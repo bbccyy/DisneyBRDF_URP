@@ -183,7 +183,7 @@ Shader "Example/Preintegrated skin base"
 
                 // apply fog
                 col.xyz = MixFog(col.xyz, IN.fogCoord);
-                //col.rgb = diff;
+                //col.rgb = diffNdotL;
 
                 return col;
             }
