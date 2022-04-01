@@ -80,7 +80,7 @@ public class CalcSSS : ScriptableWizard
 
 	private void OnWizardUpdate()
 	{
-		helpString = "Press Create to create lookup textures. You have to set wrap mode to clamp manually for correct results.";
+		helpString = "plz set output path before generating SSS lut!";
 		isValid = path != null;
 	}
 
