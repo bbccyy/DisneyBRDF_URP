@@ -12,6 +12,8 @@ Shader "Example/Preintegrated skin base"
         _LookupDiffuseSpec("Lookup Map: Diffuse Falloff(RGB) Specular(A)", 2D) = "gray" {}
         _ScatteringOffset("Scattering Boost", Range(0,1)) = 0.0
         _ScatteringPower("Scattering Power", Range(0,2)) = 1.0
+        [NoScaleOffset]_AO("AO", 2D) = "white" {}
+        _GIIntensity("GI Inetensity", Range(0, 1)) = 0 
     }
     SubShader
     {
@@ -45,6 +47,7 @@ Shader "Example/Preintegrated skin base"
             #define _MAIN_LIGHT_SHADOWS_CASCADE
             #define _SHADOWS_SOFT
             #define _ALPHATEST_ON
+            #define _ADDITIONAL_LIGHTS
 
             #pragma multi_compile _ LIGHTMAP_ON
             #pragma multi_compile _ DIRLIGHTMAP_COMBINED
@@ -57,6 +60,7 @@ Shader "Example/Preintegrated skin base"
 
             TEXTURE2D(_SpecGlosDepthMap); SAMPLER(sampler_SpecGlosDepthMap);
             TEXTURE2D(_LookupDiffuseSpec); SAMPLER(sampler_LookupDiffuseSpec);
+            TEXTURE2D(_AO); SAMPLER(sampler_AO);
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _Color;
@@ -66,6 +70,7 @@ Shader "Example/Preintegrated skin base"
                 float _SpecRoughness;
                 float _ScatteringOffset;
                 float _ScatteringPower;
+                float _GIIntensity;
             CBUFFER_END
 
             struct Attributes
@@ -91,6 +96,12 @@ Shader "Example/Preintegrated skin base"
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
+            struct PerLightOutput
+            {
+                float3 diff;
+                float spec;
+            };
+
 
             Varyings vert(Attributes IN)
             {
@@ -113,23 +124,65 @@ Shader "Example/Preintegrated skin base"
                 return OUT;
             }
 
-            float4 frag(Varyings IN) : SV_Target
+            PerLightOutput SkinPerLight(Light light, half3 viewDirWS, half3 NormalWS, float Specular, float Gloss, float Scattering)
             {
-                //light dir
-                float4 SHADOW_COORDS = TransformWorldToShadowCoord(IN.positionWS);
-                Light light = GetMainLight(SHADOW_COORDS);
+                PerLightOutput output = (PerLightOutput)0;
 
+                //light dir
                 half3 lightDirWS = normalize(TransformObjectToWorldDir(light.direction));
 
-                //view dir
-                half3 viewDirWS = normalize(_WorldSpaceCameraPos.xyz - IN.positionWS);
-
                 //ligth col
-                float3 lightColor = _MainLightColor.rgb;  //by far only consider single light src
+                float3 lightColor = light.color;
 
                 //H
                 float3 h = lightDirWS + viewDirWS;
                 float3 H = normalize(h);
+
+                float NdotL = max(saturate(dot(NormalWS, lightDirWS)), 0.000001);
+                float VdotH = max(saturate(dot(viewDirWS, H)), 0.000001);
+                float NdotH = max(saturate(dot(NormalWS, H)), 0.000001);
+
+                //float atten = saturate(light.shadowAttenuation * 1.5);
+                float atten = 1;//temporarily block any receiving shadow 
+                float diffNdotL = 0.5 + 0.5 * NdotL;
+
+                //LookupDiffuseSpec 
+                float3 diff = 2.0 * SAMPLE_TEXTURE2D(_LookupDiffuseSpec, sampler_LookupDiffuseSpec, float2(diffNdotL, Scattering)).rgb;
+                diff *= atten;
+                diff *= lightColor;
+
+                //specluar
+                float specDiff = 2.0 * SAMPLE_TEXTURE2D(_LookupDiffuseSpec, sampler_LookupDiffuseSpec, float2(NdotH, Specular)).a;
+                float PH = pow(abs(specDiff), 10.0);
+
+                //Schlick Fresnel term
+                float exponential = pow(1.0 - VdotH, 5.0);
+                float fresnelReflectance = exponential + 0.028 * (1.0 - exponential);  //0.028 -> Skin's Fresnel reflectance at normal incidence 
+
+                float frSpec = max(PH * fresnelReflectance / dot(h, h), 0);
+                float specLevel = saturate(NdotL * Gloss * frSpec);
+
+                output.diff = diff;
+                output.spec = specLevel;
+
+                return output;
+            }
+
+            //refers to:https://zhuanlan.zhihu.com/p/56052015 
+            //also refers to:https://zhuanlan.zhihu.com/p/56052015 
+            float4 frag(Varyings IN) : SV_Target
+            {
+                //adjust uv
+                IN.uv = min(IN.uv, float2(0.99, 0.99));
+                IN.uv = max(IN.uv, float2(0.01, 0.01));
+
+
+                //mainlight & shadow 
+                float4 SHADOW_COORDS = TransformWorldToShadowCoord(IN.positionWS);
+                Light mainlight = GetMainLight(SHADOW_COORDS);
+
+                //view dir
+                half3 viewDirWS = normalize(_WorldSpaceCameraPos.xyz - IN.positionWS);
 
                 //Spec + Roughness + Depth
                 float3 SpecGlosDepth = SAMPLE_TEXTURE2D(_SpecGlosDepthMap, sampler_SpecGlosDepthMap, IN.uv).rgb;
@@ -149,37 +202,35 @@ Shader "Example/Preintegrated skin base"
                 half depth = SpecGlosDepth.b;
                 float Scattering = saturate((depth + _ScatteringOffset) * _ScatteringPower);
 
-#ifdef ENABLE_RIMS
-                half rimSpread = 1 - depth * 0.8;
-                float BackRimWidth = _BackRimWidth * rimSpread;
-                float FrontRimWidth = _FrontRimWidth * rimSpread;
+                //AO 
+                half AO = SAMPLE_TEXTURE2D(_AO, sampler_AO, IN.uv).r;
+
+                //main light atten
+                //float atten = saturate(mainlight.shadowAttenuation * 1.5);
+                float atten = 1;  //temporarily block any receiving shadow 
+
+                //mainlight contribution
+                PerLightOutput diffspec = SkinPerLight(mainlight, viewDirWS, NormalWS, Specular, Gloss, Scattering);
+                float3 diff = diffspec.diff;
+                float specLevel = diffspec.spec;
+                
+#ifdef _ADDITIONAL_LIGHTS
+                uint pixelLightCount = GetAdditionalLightsCount();
+                for (uint lightIndex = 0u; lightIndex < pixelLightCount; ++lightIndex)
+                {
+                    Light light = GetAdditionalLight(lightIndex, IN.positionWS);
+                    PerLightOutput tmp = SkinPerLight(light, viewDirWS, NormalWS, Specular, Gloss, Scattering);
+                    diff += tmp.diff;
+                    specLevel += tmp.spec;
+                }
 #endif
 
-                float NdotL = max(saturate(dot(NormalWS, lightDirWS)), 0.000001);
-                float VdotH = max(saturate(dot(viewDirWS, H)), 0.000001);
-                float NdotH = max(saturate(dot(NormalWS, H)), 0.000001);
-
-                float atten = light.shadowAttenuation * 0.5;
-                float diffNdotL = 0.5 + 0.5 * NdotL;
-                //diffNdotL *= atten;
-
-                //LookupDiffuseSpec 
-                float3 diff = 2.0 * SAMPLE_TEXTURE2D(_LookupDiffuseSpec, sampler_LookupDiffuseSpec, float2(diffNdotL, Scattering)).rgb;
-                diff *= atten;
-
-                //specluar
-                float specDiff = 2.0 * SAMPLE_TEXTURE2D(_LookupDiffuseSpec, sampler_LookupDiffuseSpec, float2(NdotH, Specular)).a;
-                float PH = pow(abs(specDiff), 10.0);
-
-                float exponential = pow(1.0 - VdotH, 5.0);
-                float fresnelReflectance = exponential + 0.028 * (1.0 - exponential);
-
-                float frSpec = max(PH * fresnelReflectance / dot(h, h), 0);
-                float specLevel = saturate(NdotL * Gloss * frSpec);
+                //GI  todo...
+                float3 indiff = Albedo * _GIIntensity * AO;
 
                 //ALL IN ONE
                 float4 col = float4(0,0,0,1);
-                col.rgb = Albedo * 0.2 + lightColor * (Albedo * diff + (specLevel * atten).xxx);
+                col.rgb = indiff + Albedo * diff * AO + (specLevel * atten).xxx;
 
                 // apply fog
                 col.xyz = MixFog(col.xyz, IN.fogCoord);

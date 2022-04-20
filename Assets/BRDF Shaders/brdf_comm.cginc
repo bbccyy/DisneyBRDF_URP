@@ -66,6 +66,7 @@ float NormalDistributionF_PreFilter(float nh, float roughness) {
     CBUFFER_START(UnityPerMaterial)
     float4 _BaseMap_ST;
     float _RoughnessOffset;
+    float _RoughnessScale;
     float _Anisotropic;
     float _Subsurface;
     float _Specular;
@@ -75,8 +76,14 @@ float NormalDistributionF_PreFilter(float nh, float roughness) {
     float _Clearcoat;
     float _ClearcoatGloss;
 
+    float _MetalicOffset;
+    float _MetalicScale;
+
+    float _BrightnessScale;
+
     float _BumpScale;
     float _PrefilterScale;
+    float _IrradianceScale;
     CBUFFER_END
 #else
     TEXTURECUBE(_IrradianceMap); SAMPLER(sampler_IrradianceMap);
@@ -103,6 +110,16 @@ float NormalDistributionF_PreFilter(float nh, float roughness) {
 
 //------- End Input -------
 
+// ------- common structure starts here -------
+struct FragLightOutput
+{
+        float3 directLight;
+        float3 Fs;
+        float Gs;
+        float Ds;
+        float3 diffuse;
+};
+//------- End structure -------
 
 // ------- common functions starts here -------
 float pow2(float v) {

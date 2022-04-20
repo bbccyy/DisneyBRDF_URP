@@ -21,8 +21,9 @@ Shader "Example/DisneyBRDF Tex A"
         [NoScaleOffset]_Metallic("Metallic Map", 2D) = "white" {}
 
         //Roughness
-        _RoughnessOffset("Roughness Offset", Range(-1,1)) = 0
         [NoScaleOffset]_Roughness("Roughness Map", 2D) = "bump"  {}
+        _RoughnessOffset("Roughness Offset", Range(-1,1)) = 0
+        _RoughnessScale("Roughness Scale", Range(0, 1)) = 0
 
         //GI control
         [NoScaleOffset]_IrradianceMap("Irradiance Map", CUBE) = "white" {}
@@ -152,7 +153,7 @@ Shader "Example/DisneyBRDF Tex A"
 
                 //roughness
                 float roughness = SAMPLE_TEXTURE2D(_Roughness, sampler_Roughness, IN.uv).r;
-                roughness += _RoughnessOffset;
+                roughness = saturate((roughness + _RoughnessOffset) * _RoughnessScale);
                 float squareRoughness = roughness * roughness;
 
                 //metalic

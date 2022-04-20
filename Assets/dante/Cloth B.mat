@@ -103,11 +103,12 @@ Material:
     - _AlphaClip: 0
     - _Anisotropic: 0
     - _Blend: 0
-    - _BumpScale: 1
+    - _BrightnessScale: 2.59
+    - _BumpScale: 0.75
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
-    - _Clearcoat: 0.11
-    - _ClearcoatGloss: 0.146
+    - _Clearcoat: 0.624
+    - _ClearcoatGloss: 0.634
     - _Cull: 2
     - _Cutoff: 0.5
     - _DetailAlbedoMapScale: 1
@@ -117,22 +118,25 @@ Material:
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
+    - _MetalicOffset: 0
+    - _MetalicScale: 1
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.005
-    - _PrefilterScale: 0.203
+    - _PrefilterScale: 0.102
     - _QueueOffset: 0
     - _ReceiveShadows: 1
-    - _RoughnessOffset: -0.24
-    - _Sheen: 0.558
-    - _SheenTint: 0.775
+    - _RoughnessOffset: 0
+    - _RoughnessScale: 0.499
+    - _Sheen: 0.749
+    - _SheenTint: 0.586
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
-    - _Specular: 1
+    - _Specular: 0.742
     - _SpecularHighlights: 1
-    - _SpecularTint: 0.806
+    - _SpecularTint: 0
     - _SrcBlend: 1
-    - _Subsurface: 1
+    - _Subsurface: 0.742
     - _Surface: 0
     - _WorkflowMode: 1
     - _ZWrite: 1

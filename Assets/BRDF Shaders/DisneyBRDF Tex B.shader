@@ -21,8 +21,9 @@ Shader "Example/DisneyBRDF Tex B"
         [NoScaleOffset]_Metallic("Metallic Map", 2D) = "white" {}
 
         //Roughness
-        _RoughnessOffset("Roughness Offset", Range(-1,1)) = 0
         [NoScaleOffset]_Roughness("Roughness Map", 2D) = "bump"  {}
+        _RoughnessOffset("Roughness Offset", Range(-1,1)) = 0
+        _RoughnessScale("Roughness Scale", Range(0, 1)) = 0
 
         //GI control
         [NoScaleOffset]_IrradianceMap("Irradiance Map", CUBE) = "white" {}
@@ -30,6 +31,9 @@ Shader "Example/DisneyBRDF Tex B"
         [NoScaleOffset]_PrefilterMap("Prefilter Map", CUBE) = "white" {}
         _PrefilterScale("Prefilter Scale", Range(0, 1)) = 1.0
         [NoScaleOffset]_AO("AO", 2D) = "white" {}
+
+        //Overall brightness
+        _BrightnessScale("Brightness Scale", Range(1, 3)) = 1
     }
 
         SubShader
@@ -151,7 +155,7 @@ Shader "Example/DisneyBRDF Tex B"
 
                 //roughness
                 float roughness = SAMPLE_TEXTURE2D(_Roughness, sampler_Roughness, IN.uv).r;
-                roughness += _RoughnessOffset;
+                roughness = saturate((roughness + _RoughnessOffset) * _RoughnessScale);
                 float squareRoughness = roughness * roughness;
 
                 //metalic
@@ -161,8 +165,9 @@ Shader "Example/DisneyBRDF Tex B"
                 //normal
 #ifdef _NORMALMAP 
                 half3 normalTS = SampleNormal(IN.uv, TEXTURE2D_ARGS(_BumpMap, sampler_BumpMap), _BumpScale);
-                half3 modelNormalWS = IN.normalWS.xyz;
+                half3 modelNormalWS = NormalizeNormalPerPixel(IN.normalWS.xyz);
                 IN.normalWS = TransformTangentToWorld(normalTS, half3x3(IN.tangentWS.xyz, IN.bitangentWS.xyz, IN.normalWS.xyz));
+                IN.normalWS = NormalizeNormalPerPixel(IN.normalWS); 
 #endif
 
                 //helper values...
@@ -246,7 +251,9 @@ Shader "Example/DisneyBRDF Tex B"
 
                 // apply fog
                 col.xyz = MixFog(col.xyz, IN.fogCoord);
-                //col.xyz = Gs;
+                col.xyz *= _BrightnessScale;
+
+                //col.xyz = Fs;
 
                 return col;
             }
