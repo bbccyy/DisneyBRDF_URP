@@ -26,7 +26,6 @@ Shader "Test/testOpaqueTexture"
             #pragma fragment frag
 
             #define REQUIRE_OPAQUE_TEXTURE
-
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             
             float _Intensity;
