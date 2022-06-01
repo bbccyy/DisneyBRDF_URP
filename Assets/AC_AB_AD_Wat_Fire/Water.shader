@@ -49,7 +49,7 @@ Shader "Test/Water"
             };
 
             struct VertexOutput {
-                float4 posCS : SV_POSITION;  //顶点输出
+                float4 posCS : SV_POSITION;  //顶点输出 
                 float2 uv0 : TEXCOORD0;      //采样MainTex
                 float2 uv1 : TEXCOORD1;      //采样Warp Noise1
                 float2 uv2 : TEXCOORD2;      //采样Warp Noise2
@@ -82,7 +82,7 @@ Shader "Test/Water"
                 half4 var_MainTex = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, warpUV);
 
                 //final RGB
-                half3 finalRGB = var_MainTex * var_Warp1.b + var_MainTex * var_Warp2.b;
+                //half3 finalRGB = var_MainTex * var_Warp1.b + var_MainTex * var_Warp2.b;
 
                 //opacity
                 half opacity = 1;
