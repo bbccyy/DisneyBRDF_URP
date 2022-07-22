@@ -1,4 +1,4 @@
-
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -12,6 +12,7 @@ public class AutoLoadPipelineAsset : MonoBehaviour
         if (pipelineAsset != null)
         {
             GraphicsSettings.renderPipelineAsset = pipelineAsset;
+            //PlayerSettings.preserveFramebufferAlpha = false;
         }
     }
 }

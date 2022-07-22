@@ -11,10 +11,10 @@ Shader "Test/Water"
     SubShader{
         Tags {
             "RenderPipeline" = "UniversalPipeline"
-            "RenderType" = "Opaque"
-            "ForceNoShadowCasting" = "True"
+            "RenderType" = "Geometry"
+            "ForceNoShadowCasting" = "True" 
             "IgnoreProjector" = "True"
-            "Queue" = "Opaque"
+            "Queue" = "Geometry"
         }
 
         Pass {
