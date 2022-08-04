@@ -32,7 +32,7 @@ Shader "Example/grabpass"
             #pragma vertex vert
             #pragma fragment frag
 
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             TEXTURE2D(_ScreenGrabTexture); SAMPLER(sampler_ScreenGrabTexture);
 

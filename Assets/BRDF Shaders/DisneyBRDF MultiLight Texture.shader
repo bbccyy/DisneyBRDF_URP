@@ -247,13 +247,13 @@ Shader "Example/DisneyBRDF MultiLight Texture"
                 return output;
             }
 
-            float4 frag(Varyings IN) : SV_Target
+            float4 frag(Varyings IN, half facing : VFACE) : SV_Target
             {
 
                 //normal
 #ifdef _NORMALMAP 
                 half3 normalTS = SampleNormal(IN.uv, TEXTURE2D_ARGS(_BumpMap, sampler_BumpMap), _BumpScale);
-                half3 modelNormalWS = IN.normalWS.xyz;
+                half3 modelNormalWS = IN.normalWS.xyz * facing;
                 IN.normalWS = TransformTangentToWorld(normalTS, half3x3(IN.tangentWS.xyz, IN.bitangentWS.xyz, IN.normalWS.xyz));
 #endif
 
