@@ -48,6 +48,11 @@ public class TwoPassRenderPassFeature : ScriptableRendererFeature
 
             var sortFlags = SortingCriteria.RenderQueue;// renderingData.cameraData.defaultOpaqueSortFlags;
             var drawSettings = CreateDrawingSettings(m_ShaderTags, ref renderingData, sortFlags);
+            //DrawRenderers用于绘制一批物体
+            //cullResults -> 记录物体，灯光，反射探针剔除的结果
+            //DrawingSettings -> 设置绘制顺序时，使用哪个shader中的哪个pass 
+            //filterSettings -> 设置过滤参数来渲染指定的Layer
+            //RenderStateBlock -> 用来重载深度，模板写入方式 
             context.DrawRenderers(renderingData.cullResults, ref drawSettings, ref m_FilterSettings);
             //context.ExecuteCommandBuffer(cmd);
             //CommandBufferPool.Release(cmd);

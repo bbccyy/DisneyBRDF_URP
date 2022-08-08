@@ -33,8 +33,8 @@ public class DepthPassFeature : ScriptableRendererFeature
 
         public DepthRenderPass(Material material, string tag)
         {
-            blitMat = material; 
-            m_ProfilerTag = tag;
+            blitMat = material;  
+            m_ProfilerTag = tag; 
             m_TemporaryColorTexture.Init("_TemporaryColorTexture");
         }
 
@@ -67,7 +67,7 @@ public class DepthPassFeature : ScriptableRendererFeature
             CommandBuffer cmd = CommandBufferPool.Get(m_ProfilerTag);
 
             RenderTextureDescriptor opaqueDesc = renderingData.cameraData.cameraTargetDescriptor;
-            opaqueDesc.depthBufferBits = 0;
+            opaqueDesc.depthBufferBits = 16;
 
             cmd.GetTemporaryRT(m_TemporaryColorTexture.id, opaqueDesc, FilterMode.Bilinear);
             Blit(cmd, source, m_TemporaryColorTexture.Identifier(), blitMat, blitPassIdx);

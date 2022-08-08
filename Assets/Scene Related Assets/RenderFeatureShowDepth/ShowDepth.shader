@@ -58,7 +58,7 @@ Shader "Hidden/ShowDepth"
                 output.positionCS = TransformObjectToHClip(IN.positionOS.xyz);
 
                 float4 projPos = output.positionCS * 0.5;
-                projPos.xy = projPos.xy + projPos.w;
+                projPos.xy = projPos.xy + projPos.w;  //这到底在干啥？？ 
 
                 output.uv.xy = IN.uv;
                 output.uv.zw = projPos.xy;
@@ -77,7 +77,7 @@ Shader "Hidden/ShowDepth"
                 float depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, SampleSceneDepth(IN.uv.xy));
 #endif
                 //inputs: positionSS, depthNDC, InverseVP
-                float3 worldPos = ComputeWorldSpacePosition(IN.uv.zw, depth, unity_MatrixInvVP);
+                float3 worldPos = ComputeWorldSpacePosition(IN.uv.xy, depth, unity_MatrixInvVP);
 
                 col.rgb = worldPos.rgb;
                 col.a = 1.0;
