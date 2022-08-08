@@ -69,12 +69,13 @@ Shader "Hidden/ShowDepth"
             {
                 half4 col;
 
-                float depth = SampleSceneDepth(IN.uv);
 #if UNITY_REVERSED_Z
-                depth = 1.0 - depth;
+                float depth = SampleSceneDepth(IN.uv.xy);
+#else
+                // Adjust z to match NDC for OpenGL
+                float depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, SampleSceneDepth(IN.uv.xy));
 #endif
-                depth = 2.0 * depth - 1.0;
-
+                //inputs: positionSS, depthNDC, InverseVP
                 float3 worldPos = ComputeWorldSpacePosition(IN.uv.zw, depth, unity_MatrixInvVP);
 
                 col.rgb = worldPos.rgb;
