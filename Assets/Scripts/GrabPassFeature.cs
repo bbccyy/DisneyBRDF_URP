@@ -53,7 +53,7 @@ class GrabColTexPass : ScriptableRenderPass
     static readonly string k_RenderTag = "GrabPass";       //可在framedebug中看渲染
     RenderTargetIdentifier _cameraColorTarget;
     RenderTargetHandle _grabbedTextureHandle = RenderTargetHandle.CameraTarget;
-    string m_GrabPassName = "_DefaultGrabPassTextureName";  //shader中的grabpass(纹理)名字
+    string m_GrabPassName = "_ScreenGrabTexture";  //shader中的grabpass(纹理)名字
     public GrabColTexPass(GrabPassSetting setting)
     {
         renderPassEvent = setting.Event;
