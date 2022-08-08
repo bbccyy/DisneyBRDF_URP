@@ -26,6 +26,7 @@ Shader "Hidden/ShowDepth"
             {
                 // sample the texture
                 half4 col = SampleSceneDepth(IN.uv);  //该方法在DeclareDepthTexture.hlsl内 
+                //col.rgb 位于 [0,1]区间，属于ndc坐标下的深度z 
                 return col;
             }
             ENDHLSL
