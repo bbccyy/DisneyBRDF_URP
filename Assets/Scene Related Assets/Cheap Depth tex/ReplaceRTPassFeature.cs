@@ -27,7 +27,9 @@ public class ReplaceRTPassFeature : ScriptableRendererFeature
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
             var cam = renderingData.cameraData.camera;
-            cam.SetTargetBuffers(colRT.colorBuffer, depRT.depthBuffer);
+            //cam.SetTargetBuffers(colRT.colorBuffer, depRT.depthBuffer);
+            cam.targetTexture = colRT;
+            ConfigureTarget(colRT.colorBuffer, depRT.depthBuffer);
         }
 
         // Here you can implement the rendering logic.
@@ -36,7 +38,11 @@ public class ReplaceRTPassFeature : ScriptableRendererFeature
         // You don't have to call ScriptableRenderContext.submit, the render pipeline will call it at specific points in the pipeline.
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
-            
+            CommandBuffer cmd = CommandBufferPool.Get("replace rt");
+            Blit(cmd, renderingData.cameraData.renderer.cameraColorTarget, renderingData.cameraData.renderer.cameraColorTarget);
+            context.ExecuteCommandBuffer(cmd);
+            cmd.Clear();
+            CommandBufferPool.Release(cmd);
         }
 
         // Cleanup any allocated resources that were created during the execution of this render pass.
@@ -52,14 +58,15 @@ public class ReplaceRTPassFeature : ScriptableRendererFeature
     {
         m_ScriptablePass = new ReplaceRTPass();
 
-        colRT = RenderTexture.GetTemporary(Camera.main.pixelWidth, Camera.main.pixelHeight, 0, RenderTextureFormat.RGB111110Float);
-        colRT.name = "main color buffer";
+        colRT = RenderTexture.GetTemporary(Camera.main.pixelWidth, Camera.main.pixelHeight, 0, RenderTextureFormat.ARGB64);
+        colRT.name = "main1 color buffer";
+        colRT.filterMode = FilterMode.Point;
         depRT = RenderTexture.GetTemporary(Camera.main.pixelWidth, Camera.main.pixelHeight, 24, RenderTextureFormat.Depth);
         depRT.name = "main depth buffer";
 
         m_ScriptablePass.Setup(colRT, depRT);   
         // Configures where the render pass should be injected.
-        m_ScriptablePass.renderPassEvent = RenderPassEvent.BeforeRenderingOpaques - 1;
+        m_ScriptablePass.renderPassEvent = RenderPassEvent.BeforeRenderingPrepasses - 1;
     }
 
     // Here you can inject one or multiple render passes in the renderer.

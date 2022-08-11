@@ -72,11 +72,17 @@ public class GetRawDepthRenderPassFeature : ScriptableRendererFeature
             if (setting == GrabDepthStrategy.GrabDepthFromRT)
             {
                 //buffer = m_cam_depth_buffer; 
-                buffer = renderingData.cameraData.renderer.cameraDepthTarget;
+                //buffer = renderingData.cameraData.renderer.cameraDepthTarget;
+                var curRT = renderingData.cameraData.camera.activeTexture;
+                buffer = curRT.depthBuffer;
             }
             else if (setting == GrabDepthStrategy.GrabColorFromRT)
             {
-                buffer = renderingData.cameraData.renderer.cameraColorTarget;
+                var curRT = renderingData.cameraData.camera.activeTexture;
+                buffer = curRT.colorBuffer;
+                var tmp = renderingData.cameraData.renderer.cameraColorTarget;
+                buffer = tmp;
+                //buffer = renderingData.cameraData.renderer.cameraColorTarget;
             }
             else
             {
@@ -91,11 +97,12 @@ public class GetRawDepthRenderPassFeature : ScriptableRendererFeature
             cmd.GetTemporaryRT(m_RenderTarget.id, descriptor, FilterMode.Point);
 
             ConfigureTarget(m_RenderTarget.id);
-            cmd.CopyTexture(buffer, m_RenderTarget.Identifier()); //Blit(cmd, buffer, m_RenderTarget.Identifier());
+            //cmd.CopyTexture(buffer, m_RenderTarget.Identifier());
+            Blit(cmd, buffer, m_RenderTarget.Identifier());
             context.ExecuteCommandBuffer(cmd);
             cmd.Clear();
             CommandBufferPool.Release(cmd);
-            
+            renderingData.cameraData.camera.targetTexture = null;
 
         }
 

@@ -14,6 +14,14 @@ public class ReplaceCameraRT : MonoBehaviour
     
     private Camera cam;
 
+    public void InitRTSimple()
+    {
+        incameraColorBuffer = RenderTexture.GetTemporary(cam.pixelWidth, cam.pixelHeight, 0, RenderTextureFormat.ARGB32);
+        incameraColorBuffer.name = "main color buffer";
+        //incameraColorBuffer.depthBuffer;
+        cam.targetTexture = incameraColorBuffer;
+    }
+
     public void InitRT()
     {
         cam = GetComponent<Camera>();
@@ -28,7 +36,6 @@ public class ReplaceCameraRT : MonoBehaviour
 
         //so called "off-screen rendering" 
         cam.SetTargetBuffers(incameraColorBuffer.colorBuffer, incameraDepthBuffer.depthBuffer);
-        cam.targetTexture = incameraColorBuffer;
 
         cameraDepthCMD = new CommandBuffer() { name = "Depth Copy CMD" };
         cameraColorCMD = new CommandBuffer() { name = "Color Copy CMD" };
@@ -57,7 +64,8 @@ public class ReplaceCameraRT : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
-        InitRT();
+        //InitRTSimple();
+        //InitRT();
     }
 
     private void Awake()
