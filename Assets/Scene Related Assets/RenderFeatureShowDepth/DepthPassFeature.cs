@@ -15,6 +15,7 @@ public class DepthPassFeature : ScriptableRendererFeature
         Depth,
         WorldPosition,
         Slice,
+        ShowActiveRenderBuffer,
     }
 
     public ViewSettings settings = new ViewSettings();
@@ -71,7 +72,9 @@ public class DepthPassFeature : ScriptableRendererFeature
 
             cmd.GetTemporaryRT(m_TemporaryColorTexture.id, opaqueDesc, FilterMode.Bilinear);
             Blit(cmd, source, m_TemporaryColorTexture.Identifier(), blitMat, blitPassIdx);
+            //Blit(cmd, m_TemporaryColorTexture.Identifier(), destination.Identifier());
             Blit(cmd, m_TemporaryColorTexture.Identifier(), source);
+            //Blit(cmd, m_TemporaryColorTexture.Identifier(), new RenderTargetIdentifier(BuiltinRenderTextureType.None));
 
             context.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
@@ -94,7 +97,7 @@ public class DepthPassFeature : ScriptableRendererFeature
         m_DepthRenderPass = new DepthRenderPass(mat, name);
 
         // Configures where the render pass should be injected.
-        m_DepthRenderPass.renderPassEvent = RenderPassEvent.AfterRenderingTransparents;
+        m_DepthRenderPass.renderPassEvent = RenderPassEvent.AfterRenderingTransparents + 1;
         m_DepthRenderPass.blitPassIdx = (int)settings.texBuf;
     }
 

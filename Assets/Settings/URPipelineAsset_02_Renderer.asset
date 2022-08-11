@@ -1,33 +1,5 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!114 &-7681589242450666344
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f08778ab21dd0c344975ab5d15d5fbeb, type: 3}
-  m_Name: DepthPassFeature
-  m_EditorClassIdentifier: 
-  m_Active: 1
-  settings:
-    texBuf: 0
---- !u!114 &-3920134284208623935
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 195916c9c42859049bc08d3b8504c3d3, type: 3}
-  m_Name: TwoPassRenderPassFeature
-  m_EditorClassIdentifier: 
-  m_Active: 1
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -38,12 +10,12 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: de640fe3d0db1804a85f9fc8f5cadab6, type: 3}
-  m_Name: URPipelineAsset_01_Renderer
+  m_Name: URPipelineAsset_02_Renderer
   m_EditorClassIdentifier: 
   m_RendererFeatures:
-  - {fileID: -3920134284208623935}
-  - {fileID: -7681589242450666344}
-  m_RendererFeatureMap: c12eea65a3e298c9981c446548836595
+  - {fileID: 7662886204850334978}
+  - {fileID: 5892349594727771997}
+  m_RendererFeatureMap: 026d5852670a586a5d6f2ac6bcd4c551
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   xrSystemData: {fileID: 11400000, guid: 60e1133243b97e347b653163a8c01b64, type: 2}
   shaders:
@@ -72,3 +44,33 @@ MonoBehaviour:
   m_ShadowTransparentReceive: 1
   m_RenderingMode: 0
   m_AccurateGbufferNormals: 0
+--- !u!114 &5892349594727771997
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f08778ab21dd0c344975ab5d15d5fbeb, type: 3}
+  m_Name: ReplaceRTPassFeature
+  m_EditorClassIdentifier: 
+  m_Active: 1
+  settings:
+    texBuf: 3
+--- !u!114 &7662886204850334978
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f230fb9dbab422a4faf310a187cf65c3, type: 3}
+  m_Name: Do grab active cam render buffer according to settings
+  m_EditorClassIdentifier: 
+  m_Active: 1
+  settings:
+    GrabDepthStrategy: 2

@@ -119,5 +119,34 @@ Shader "Hidden/ShowDepth"
             }
             ENDHLSL
         }
+
+        Pass
+        {
+            Name "Raw Texture"
+
+            HLSLPROGRAM
+            #pragma vertex Vert         //PostProcessing/Common.hlsl中定义了全屏Mesh对应的Vert方法 
+            #pragma fragment Frag
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/PostProcessing/Common.hlsl"
+
+            TEXTURE2D_X_FLOAT(_CameraDepthTex); //_RawTexture
+            SAMPLER(sampler_CameraDepthTex);    //sampler_RawTexture
+
+            float SampleSceneDepth2(float2 uv)
+            {
+                return SAMPLE_TEXTURE2D_X(_CameraDepthTex, sampler_CameraDepthTex, UnityStereoTransformScreenSpaceTex(uv)).r;
+            }
+
+            half4 Frag(Varyings IN) : SV_Target
+            {
+                // sample the texture from user defined texture 
+                half4 col = (SampleSceneDepth2(IN.uv));
+                //col.rgb 位于 [0,1]区间，属于ndc坐标下的深度z 
+                return col;
+            }
+            ENDHLSL
+        }
     }
 }
