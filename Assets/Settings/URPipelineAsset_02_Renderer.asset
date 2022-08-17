@@ -10,7 +10,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e582af77159bf3b4c9bdc9247753df77, type: 3}
-  m_Name: DoReplaceRTPassFeature
+  m_Name: replace camera RT
   m_EditorClassIdentifier: 
   m_Active: 1
 --- !u!114 &11400000
@@ -68,7 +68,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f08778ab21dd0c344975ab5d15d5fbeb, type: 3}
-  m_Name: DoReplaceRTPassFeature
+  m_Name: ToShow
   m_EditorClassIdentifier: 
   m_Active: 1
   settings:
@@ -83,7 +83,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f230fb9dbab422a4faf310a187cf65c3, type: 3}
-  m_Name: Do grab active cam render buffer according to settings
+  m_Name: Grab active cam render buffer according to settings
   m_EditorClassIdentifier: 
   m_Active: 1
   settings:

@@ -47,8 +47,6 @@ public class GetRawDepthRenderPassFeature : ScriptableRendererFeature
         // The render pipeline will ensure target setup and clearing happens in a performant manner.
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
-           
-
             m_cam_depth_buffer = renderingData.cameraData.renderer.cameraDepthTarget;
             m_depth_buffer = m_RenderTarget.Identifier();
             //ConfigureTarget(m_depth_buffer);
