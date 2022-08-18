@@ -1,4 +1,4 @@
-Shader "Test/rebuildPosWS_1"
+Shader "Test/TestInputVertexInPixelShader"
 {
     Properties
     {
