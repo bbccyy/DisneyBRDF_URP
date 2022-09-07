@@ -81,8 +81,8 @@ Shader "Kena/KenaGI"
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(IN);
 
-                half2 suv = IN.vertex.xy * screen_param.zw;
-                half2 coord = (IN.vertex.xy * screen_param.zw - 0.5) * IN.vertex.w * 2.0;  //[-1, +1]
+                half2 suv = IN.vertex.xy * screen_param.zw;     //screen uv 
+                half2 coord = (IN.vertex.xy * screen_param.zw - 0.5) * IN.vertex.w * 2.0;  //[-1, +1] 
 
                 //Sample Depth
                 half d = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, suv); 
@@ -98,9 +98,41 @@ Shader "Kena/KenaGI"
                 //ViewDir
                 half3 viewDir = normalize(posWS.xyz - camPosWS);
 
+                //Sample Normal
+                half3 n = SAMPLE_TEXTURE2D(_Norm, sampler_Norm, suv);
+                n = n * 2 - 1; 
+                half3 norm = normalize(n);
+
+                //get chessboard mask 
+                uint2 jointPixelIdx = (uint2)(IN.vertex.xy);
+                uint chessboard = (jointPixelIdx.x + jointPixelIdx.y + 1) & 0x00000001;
+                half2 mask = chessboard ? half2(1, 0) : half2(0, 1);
+
+                //Sample _R_I_F_R 
+                float4 rifr = SAMPLE_TEXTURE2D(_R_I_F_R, sampler_R_I_F_R, suv); 
+                uint flag = (uint)round(rifr.z * 255);
+                uint2 condi = flag & uint2(15, 16);//condi.x控制像素渲染逻辑(颜色表现丰富则噪点密集，表现单一则成块同色), y控制颜色混合;  
+
+                //Sample _F_R_X_X
+                float4 frxx = SAMPLE_TEXTURE2D(_F_R_X_X, sampler_F_R_X_X, suv);
+                //frxx 的数据覆盖:衣服布料(除缝线和划痕),树叶(颜色不连续，有随机间断),头部轮廓(彩色的?) 
+                frxx = condi.y == 16 ? float4(0, 0, 0, 0) : frxx.xyzw; 
+
+                //计算渲染通道mask, matCondi.xyz 分别对应 9, 5 和 4号渲染通道 -> 提供了随机的微小噪点 
+                uint3 matCondi = condi.xxx == uint3(9, 5, 4).xyz; 
+
+                //Sample Diffuse 
+                half4 df = SAMPLE_TEXTURE2D(_Diffuse, sampler_Diffuse, suv); 
+
+                //Diffuse_GI_base 
+                half base_intensity = rifr.y * 0.08;
+                half4 df_delta = df.xyzw - base_intensity; //从漫反射图中减去部分光强度 -> 余下部分高亮度材质(皮肤+窗户等) 
+                half factor_RoughOrZero = matCondi.x ? 0 : rifr.x; //rifr.x=rough,只有屋顶+人物有值 
                 
+                //对扣除强度的dif_delta部分做缩放(主要基于材质自身的rough)，最后再加回扣除的光强 
+                half4 df_base = df_delta * factor_RoughOrZero + base_intensity;
                 
-                return half4(viewDir.xyz, 1);
+                return half4((half4)(condi).xxxx / 16 );
             }
             ENDHLSL
         }
