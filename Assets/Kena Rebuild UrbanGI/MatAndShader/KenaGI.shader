@@ -66,6 +66,12 @@ Shader "Kena/KenaGI"
 
             static float3 camPosWS = float3(-58890.16015625, 27509.392578125, -6150.4560546875);
 
+            float pow5(float a)
+            {
+                float t = a * a;
+                return t * t * a;
+            }
+
             v2f vert (appdata IN)
             {
                 v2f OUT;
@@ -95,7 +101,7 @@ Shader "Kena/KenaGI"
                 //use matrix_Inv_VP to rebuild posWS 
                 half4 posWS = mul(M_Inv_VP, hclip);
 
-                //ViewDir
+                //ViewDir (使用时取反: 从视点触发指向摄像机)
                 half3 viewDir = normalize(posWS.xyz - camPosWS);
 
                 //Sample Normal
@@ -106,7 +112,7 @@ Shader "Kena/KenaGI"
                 //get chessboard mask 
                 uint2 jointPixelIdx = (uint2)(IN.vertex.xy);
                 uint chessboard = (jointPixelIdx.x + jointPixelIdx.y + 1) & 0x00000001;
-                half2 mask = chessboard ? half2(1, 0) : half2(0, 1);
+                half2 chessMask = chessboard ? half2(1, 0) : half2(0, 1);
 
                 //Sample _R_I_F_R 
                 float4 rifr = SAMPLE_TEXTURE2D(_R_I_F_R, sampler_R_I_F_R, suv); 
@@ -115,8 +121,8 @@ Shader "Kena/KenaGI"
 
                 //Sample _F_R_X_X
                 float4 frxx = SAMPLE_TEXTURE2D(_F_R_X_X, sampler_F_R_X_X, suv);
-                //frxx 的数据覆盖:衣服布料(除缝线和划痕),树叶(颜色不连续，有随机间断),头部轮廓(彩色的?) 
-                frxx = condi.y == 16 ? float4(0, 0, 0, 0) : frxx.xyzw; 
+                //下面frxx_condi的数据覆盖:衣服布料色(除缝线和划痕),树叶(绿色不连续，有随机间断),头部轮廓(彩)   
+                float4 frxx_condi = condi.y == 16 ? float4(0, 0, 0, 0) : frxx.xyzw; //其x通道负责后续Fresnel项功能 
 
                 //计算渲染通道mask, matCondi.xyz 分别对应 9, 5 和 4号渲染通道 -> 提供了随机的微小噪点 
                 uint3 matCondi = condi.xxx == uint3(9, 5, 4).xyz; 
@@ -129,10 +135,46 @@ Shader "Kena/KenaGI"
                 half4 df_delta = df.xyzw - base_intensity; //从漫反射图中减去部分光强度 -> 余下部分高亮度材质(皮肤+窗户等) 
                 half factor_RoughOrZero = matCondi.x ? 0 : rifr.x; //rifr.x=rough,只有屋顶+人物有值 
                 
-                //对扣除强度的dif_delta部分做缩放(主要基于材质自身的rough)，最后再加回扣除的光强 
-                half4 df_base = df_delta * factor_RoughOrZero + base_intensity;
+                //从采样df中先扣除强度,获得"dif_delta",再对其缩放(主要基于材质自身的rough)，最后再加回扣除的光强 
+                half4 df_base = df_delta * factor_RoughOrZero + base_intensity; 
+
+                //计算集中中间态颜色: R8, R10 和 R11 
+                uint is9or5 = matCondi.x | matCondi.y;
+                half3 R8 = half3(1, 1, 1);  //TODO 
+                half4 R11 = half4(df_base.xyz, rifr.y) * chessMask.y;       //经过棋盘处理的 df_base 
+                half4 R10 = is9or5 ? half4(chessMask.xxx, R11.w) : half4(df.xyz, rifr.y);  //部分人物+窗户等物件显示diffse,其他近似黑白噪点 
+
+                //计算优化后的 NoV 输出到 df_base.w 中 -> 不是Lambert(NoL)，也不是Phong(NoH)，应该和Fresnel或漫反射强度相关 
+                half NoV = dot(norm, -viewDir);
+                half NoV_sat = saturate(NoV);
+                half a = (NoV_sat * 0.5 + 0.5) * NoV_sat - 1.0; //大体上在[-1, 0]区间上成二次弧线分布，N和V垂直得-1 
+                half b = saturate(1.25 - 1.25 * rifr.w); //与纹理.rough2成反比，且整体调整了偏移和缩放 
+                df_base.w = a * b; //这张输出图对比 NoV 来说，区间在[-1, 0]，且物体边缘数值绝对值大，中间值接近0 
+                half NoV_nearOne = df_base.w + 1.0; //上面的数值转换到 [0, 1] 区间，整体类似提亮的NoV，垂直得0(边缘暗)，同向得1(中间亮) 
                 
-                return half4((half4)(condi).xxxx / 16 );
+                //计算R12颜色 
+                half3 R12 = R10.xyz * 1.111111;
+                half3 tmp_col = 0.85 * (NoV_sat - 1) * (1 - (R12 - 0.78*(R12 * R12 - R12))) + 1; 
+                R12 = R12 * tmp_col;    //将基于NoV的环境光强度 -> 作用到 R10 颜色上 
+
+                //施加Fresnel影响 
+                float p5 = pow5(1 - NoV_sat);
+                float fresnel = 0.04 * (1 - p5) + p5;                 //TODO:这个F项可摘录 
+                tmp_col = R10.xyz * (1 - frxx_condi.x * fresnel);     //这里是将 Fresnel 项 -> 作用到 R10 颜色上 
+                R12 = 0.9 * NoV_nearOne * R12;                        //这是经过环境光强度修正的 R10 
+                R12 = lerp(tmp_col, R12, frxx_condi.x * factor_RoughOrZero);  //lerp中的Rate在绝大部分情况下趋于 0 
+
+
+                //采样AO
+
+                //求半分辨率下的UV
+
+                //多次采样GlobalNormal
+
+                //利用全局法线扰动，求颜色 R13 
+
+
+                return half4((R12).xyz, 1);
             }
             ENDHLSL
         }
