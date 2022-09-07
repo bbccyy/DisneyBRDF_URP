@@ -66,6 +66,8 @@ Shader "Kena/KenaGI"
 
             static float3 camPosWS = float3(-58890.16015625, 27509.392578125, -6150.4560546875);
 
+            static float2 cb0_6 = float2(0.998231828212738, 0.998937487602233);
+
             float pow5(float a)
             {
                 float t = a * a;
@@ -159,22 +161,30 @@ Shader "Kena/KenaGI"
 
                 //施加Fresnel影响 
                 float p5 = pow5(1 - NoV_sat);
-                float fresnel = 0.04 * (1 - p5) + p5;                 //TODO:这个F项可摘录 
+                float fresnel = 0.04 * (1 - p5) + p5;                 //TODO:这个F项计算方式可摘录 
                 tmp_col = R10.xyz * (1 - frxx_condi.x * fresnel);     //这里是将 Fresnel 项 -> 作用到 R10 颜色上 
                 R12 = 0.9 * NoV_nearOne * R12;                        //这是经过环境光强度修正的 R10 
                 R12 = lerp(tmp_col, R12, frxx_condi.x * factor_RoughOrZero);  //lerp中的Rate在绝大部分情况下趋于 0 
 
-
                 //采样AO
+                half ao = SAMPLE_TEXTURE2D(_AO, sampler_AO, suv);
+
 
                 //求半分辨率下的UV
+                half2 _suv = min(suv, cb0_6.xy);  //r13.xy
+                half2 half_scr_pixels = floor(screen_param.xy * 0.5);  //r13.zw
+                half2 one_over_half_pixels = 1.0 / half_scr_pixels;
+                half2 half_cur_uv = floor(_suv * half_scr_pixels - 0.5) / half_scr_pixels;
+                half_cur_uv = one_over_half_pixels * 0.5 + half_cur_uv;
+                half2 uv_delta = _suv - half_cur_uv;
+                half2 delta_half_pixels = uv_delta * half_scr_pixels; 
 
                 //多次采样GlobalNormal
 
                 //利用全局法线扰动，求颜色 R13 
 
 
-                return half4((R12).xyz, 1);
+                return half4((ao).xxx, 1);
             }
             ENDHLSL
         }
