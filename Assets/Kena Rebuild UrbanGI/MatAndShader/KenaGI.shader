@@ -94,7 +94,7 @@ Shader "Kena/KenaGI"
 
                 //Sample Depth
                 half d = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, suv); 
-                d = 1 / (d * 0.1);  // Clip.z 
+                d = 1 / (d * 0.1);  // Clip.z, 对原始d*0.1推测是将长度单位从 cm -> m 
                 
                 //get h-clip space 
                 coord = coord * d; 
@@ -106,15 +106,15 @@ Shader "Kena/KenaGI"
                 //ViewDir (使用时取反: 从视点触发指向摄像机)
                 half3 viewDir = normalize(posWS.xyz - camPosWS);
 
-                //Sample Normal
-                half3 n = SAMPLE_TEXTURE2D(_Norm, sampler_Norm, suv);
+                //Sample Normal 
+                half3 n = SAMPLE_TEXTURE2D(_Norm, sampler_Norm, suv); 
                 n = n * 2 - 1; 
-                half3 norm = normalize(n);
+                half3 norm = normalize(n); 
 
                 //get chessboard mask 
-                uint2 jointPixelIdx = (uint2)(IN.vertex.xy);
-                uint chessboard = (jointPixelIdx.x + jointPixelIdx.y + 1) & 0x00000001;
-                half2 chessMask = chessboard ? half2(1, 0) : half2(0, 1);
+                uint2 jointPixelIdx = (uint2)(IN.vertex.xy); 
+                uint chessboard = (jointPixelIdx.x + jointPixelIdx.y + 1) & 0x00000001; 
+                half2 chessMask = chessboard ? half2(1, 0) : half2(0, 1); 
 
                 //Sample _R_I_F_R 
                 float4 rifr = SAMPLE_TEXTURE2D(_R_I_F_R, sampler_R_I_F_R, suv); 
@@ -188,10 +188,47 @@ Shader "Kena/KenaGI"
                 half4 g_norm_lu = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.zw); 
                 half4 g_norm_ru = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.xw); 
 
-                //利用全局法线扰动，求颜色 R13 
+                //利用(全局法线 & 深度)的差异做扰动，求颜色 R13 
+                //首先下面基于屏幕像素索引的“奇偶”性，组合出一定随机特性的屏幕空间纹理 
+                half2 tmp2 = 1 - delta_half_pixels; 
+                half4 scr_pat = half4(tmp2.x * tmp2.y, 
+                    delta_half_pixels * tmp2, 
+                    delta_half_pixels.x * delta_half_pixels.y); 
+                //组合4次采样的深度 
+                half4 depth4 = half4(g_norm_ld.w, g_norm_rd.w, g_norm_lu.w, g_norm_ru.w); //注,这里的w通道存放单位为里面的距离 
+                depth4 = 1.0 / (abs(depth4 - d) + 0.0001) * scr_pat;   //r13.xyzw 
+                half g_depth = 1.0 / dot(depth4, half4(1.0, 1.0, 1.0, 1.0)); 
+                //如下本质是矩阵变换，矩阵每一列是采样_GNorm获得的附近4邻域的法线，而变化对象的每一个通道是深度差的倒数(这是屏幕空间法线的一种计算方式) 
+                half3 d_norm = g_norm_ld.xyz * depth4.xxx + g_norm_rd.xyz * depth4.yyy + g_norm_lu.xyz * depth4.zzz + g_norm_ru.xyz * depth4.www; 
+                //1/0.0001667 = 6000 -> 推测是编码距离时使用的极大值，20000推测是缩放系数 
+                //整体来说:当d>20000时scale横为0; 当14000<d<20000时scale在[0,1]区间上线性分布; 当d<14000时scale横为1 
+                half scale = saturate((20000 - d) * 0.00016666666);      //Scale, 靠近摄像机->1，远离->0 
+                d_norm = scale * (d_norm * g_depth - norm) + norm;       //这张基于4邻域深度差扰动后的d_norm看起来与_GNorm很像(可能略微模糊了一点?) 
+
+                half4 test = half4(0, 0, 0, 0);
+                if (condi.x)  //对于 #1 ~ #15 号渲染通道来说都能进入 
+                {
+                    //R12和R10颜色都是黑白噪点下显示人物本体Diffuse的贴图，区别在于R12对D图施加了NoV和Fresnel，而R10是直白的D图  
+                    half3 R15 = matCondi.z ? (R12 - R12 * factor_RoughOrZero) : (R10 - R10 * factor_RoughOrZero);
+                    //RN 来自 _GNorm 贴图，经多次采样和叠加而得，推测是某种小范围随机和模糊后的N -> RandomNorm(或RN) 
+                    half RN = dot(d_norm, d_norm);
+                    half RN_Len = sqrt(RN);
+                    RN = d_norm / max(RN_Len, 0.00001);
+                    
+                    half bias_N = (norm - RN) * RN_Len + RN; //让RN朝着Norm的方向偏折一定距离 
+                    half RNoN = dot(RN, norm);
+                    half R11W = RN_Len * (1 - RNoN) + RNoN;  //TODO: 给个名字? 
+
+                    test.xyz = R15;
+                }
+                else //对于 #0 号 渲染通道 
+                {
+
+                }
 
 
-                return half4((g_norm_ru).xyzw);
+
+                return half4((test).xyz, 1 );
             }
             ENDHLSL
         }
