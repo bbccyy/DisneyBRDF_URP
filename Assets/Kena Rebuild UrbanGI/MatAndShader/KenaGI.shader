@@ -169,22 +169,29 @@ Shader "Kena/KenaGI"
                 //采样AO
                 half ao = SAMPLE_TEXTURE2D(_AO, sampler_AO, suv);
 
+                //求半分辨率下的UV 
+                half2 _suv = min(suv, cb0_6.xy);                        //正常分辨率下的 UV 
+                half2 half_scr_pixels = floor(screen_param.xy * 0.5);   //半分辨率下，屏幕的长宽对应像素个数 
+                half2 one_over_half_pixels = 1.0 / half_scr_pixels;     //半分辨率下，一个像素对应 UV 的跨度 
+                //下式将全分辨率 UV 转换到了 半分辨率对应的新 UV' -> 新UV'的值朝原点靠拢 
+                //特点1: 正常分辨率下的“偶”数像素 UV 值，经变换后减少了 0.5*(1/原始长宽像素个数) 
+                //特点2: 正常分辨率下的“奇”数像素 UV 值，经变换后减少了 1.5*(1/原始长宽像素个数) 
+                half2 half_cur_uv = floor(_suv * half_scr_pixels - 0.5) / half_scr_pixels + one_over_half_pixels * 0.5; 
+                half2 uv_delta = _suv - half_cur_uv;    //UV - UV' -> (0.5或1.5)*(1/原始长宽像素个数) 
+                //半分辨率下，(UV - UV')占一个像素多少百分比(注:此时像素面积膨胀为原来4倍，长宽膨胀为原来2倍) 
+                half2 delta_half_pixels = uv_delta * half_scr_pixels;  //推算下来，占用了(0.25或0.75)个大像素点长度 
 
-                //求半分辨率下的UV
-                half2 _suv = min(suv, cb0_6.xy);  //r13.xy
-                half2 half_scr_pixels = floor(screen_param.xy * 0.5);  //r13.zw
-                half2 one_over_half_pixels = 1.0 / half_scr_pixels;
-                half2 half_cur_uv = floor(_suv * half_scr_pixels - 0.5) / half_scr_pixels;
-                half_cur_uv = one_over_half_pixels * 0.5 + half_cur_uv;
-                half2 uv_delta = _suv - half_cur_uv;
-                half2 delta_half_pixels = uv_delta * half_scr_pixels; 
-
-                //多次采样GlobalNormal
+                //多次采样GlobalNormal 
+                half4 tmp_uv = half_cur_uv.xyxy + half4(one_over_half_pixels.x, 0, 0, one_over_half_pixels.y); 
+                half4 g_norm_ld = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, half_cur_uv.xy); 
+                half4 g_norm_rd = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.xy); 
+                half4 g_norm_lu = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.zw); 
+                half4 g_norm_ru = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.xw); 
 
                 //利用全局法线扰动，求颜色 R13 
 
 
-                return half4((ao).xxx, 1);
+                return half4((g_norm_ru).xyzw);
             }
             ENDHLSL
         }
