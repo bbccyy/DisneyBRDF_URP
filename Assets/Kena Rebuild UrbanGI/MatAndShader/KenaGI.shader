@@ -222,11 +222,18 @@ Shader "Kena/KenaGI"
                     half AO_from_RN = RN_Len * (1 - RNoN) + RNoN;  //通过全局法线纹理获得的AO -> r11.w 
 
                     //计算AO_final, 备注:log2_n = 1.442695 * ln_n 
-                    half factor = saturate(40.008 /(exp(-0.01*(RN_Len * 10.0 - 5))+1) - 19.504); 
-                    factor = pow(factor, 0.7); 
-                    factor = lerp(factor, 1, 0);  //rate=0 来自cb0[1].w 
+                    half computed_ao = saturate(40.008 /(exp(-0.01*(RN_Len * 10.0 - 5))+1) - 19.504); 
+                    computed_ao = pow(computed_ao, 0.7);
+                    computed_ao = lerp(computed_ao, 1, 0);  //rate = 0 -> 来自cb0[1].w 
 
-                    test.x = factor;
+                    uint AO_blend_Type = (0 == 1); //其中 1 来自 cb0[9].x 
+                    half min_of_texao_and_ssao = min(df.w, ao); //min(Tex_AO, SSAO)
+                    half min_of_3_ao = min(computed_ao, min_of_texao_and_ssao); 
+                    half mul_of_compao_and_minao = computed_ao * min_of_texao_and_ssao;
+                    half AO_final = AO_blend_Type ? min_of_3_ao : mul_of_compao_and_minao;
+
+
+                    test.x = AO_final;
                 }
                 else //对于 #0 号 渲染通道 
                 {
