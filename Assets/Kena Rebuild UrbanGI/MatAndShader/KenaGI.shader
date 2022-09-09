@@ -205,21 +205,28 @@ Shader "Kena/KenaGI"
                 half scale = saturate((20000 - d) * 0.00016666666);      //Scale, 靠近摄像机->1，远离->0 
                 d_norm = scale * (d_norm * g_depth - norm) + norm;       //这张基于4邻域深度差扰动后的d_norm看起来与_GNorm很像(可能略微模糊了一点?) 
 
-                half4 test = half4(0, 0, 0, 0);
+                half4 test = half4(0, 0, 0, 0);  //JUST FOR SHOW-RESULTS 
                 if (condi.x)  //对于 #1 ~ #15 号渲染通道来说都能进入 
                 {
-                    //R12和R10颜色都是黑白噪点下显示人物本体Diffuse的贴图，区别在于R12对D图施加了NoV和Fresnel，而R10是直白的D图  
-                    half3 R15 = matCondi.z ? (R12 - R12 * factor_RoughOrZero) : (R10 - R10 * factor_RoughOrZero);
+                    //R12和R10颜色都是黑白噪点下显示人物本体Diffuse的贴图，区别在于R12对D图施加了NoV和Fresnel，而R10是直白的D图 
+                    half3 R15 = matCondi.z ? (R12 - R12 * factor_RoughOrZero) : (R10 - R10 * factor_RoughOrZero); 
                     //RN 来自 _GNorm 贴图，经多次采样和叠加而得，推测是某种小范围随机和模糊后的N -> RandomNorm(或RN) 
-                    half RN = dot(d_norm, d_norm);
-                    half RN_Len = sqrt(RN);
-                    RN = d_norm / max(RN_Len, 0.00001);
+                    half RN = dot(d_norm, d_norm); 
+                    half RN_Len = sqrt(RN); 
+                    RN = d_norm / max(RN_Len, 0.00001); 
                     
-                    half bias_N = (norm - RN) * RN_Len + RN; //让RN朝着Norm的方向偏折一定距离 
-                    half RNoN = dot(RN, norm);
-                    half R11W = RN_Len * (1 - RNoN) + RNoN;  //TODO: 给个名字? 
+                    //计算AO_from_RN 
+                    half bias_N = (norm - RN) * RN_Len + RN; //让RN朝着Norm的方向偏折一定距离 -> r17.xyz 
+                    half RNoN = dot(RN, norm); 
+                    //TODO:这个AO项计算方式可摘录 
+                    half AO_from_RN = RN_Len * (1 - RNoN) + RNoN;  //通过全局法线纹理获得的AO -> r11.w 
 
-                    test.xyz = R15;
+                    //计算AO_final, 备注:log2_n = 1.442695 * ln_n 
+                    half factor = saturate(40.008 /(exp(-0.01*(RN_Len * 10.0 - 5))+1) - 19.504); 
+                    factor = pow(factor, 0.7); 
+                    factor = lerp(factor, 1, 0);  //rate=0 来自cb0[1].w 
+
+                    test.x = factor;
                 }
                 else //对于 #0 号 渲染通道 
                 {
@@ -228,7 +235,7 @@ Shader "Kena/KenaGI"
 
 
 
-                return half4((test).xyz, 1 );
+                return half4((test).xxx, 1 );
             }
             ENDHLSL
         }
