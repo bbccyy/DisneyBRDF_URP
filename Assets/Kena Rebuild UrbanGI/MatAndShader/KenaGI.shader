@@ -64,6 +64,22 @@ Shader "Kena/KenaGI"
                 float4(0, 0, 0, 1)
                 );
 
+            static float4x4 M_CB1_181 = float4x4(
+                float4(0.002263982, -0.06811329, 0.245573655, 0.342455983),
+                float4(0.001246308, -0.056144755, 0.291698247, 0.420799345),
+                float4(0.000283619, -0.032326974, 0.36867857, 0.53766793),
+                float4(0, 0, 0, 1)
+                );
+
+            static float4x4 M_CB1_184 = float4x4(
+                float4(-0.014053623, -0.017187765, -0.070339404, 0.004438644),
+                float4(-0.010436025, -0.013045031, -0.07726939, 0.003332109),
+                float4(-0.005038799, -0.002133884, -0.076634146, 0.001644174),
+                float4(0, 0, 0, 1)
+                );
+
+            static float3 V_CB1_187 = float3(-0.016062476, -0.010786114, -0.003302935);
+
             static float3 camPosWS = float3(-58890.16015625, 27509.392578125, -6150.4560546875);
 
             static float2 cb0_6 = float2(0.998231828212738, 0.998937487602233);
@@ -223,14 +239,27 @@ Shader "Kena/KenaGI"
 
                     //计算AO_final, 备注:log2_n = 1.442695 * ln_n 
                     half computed_ao = saturate(40.008 /(exp(-0.01*(RN_Len * 10.0 - 5))+1) - 19.504); 
-                    computed_ao = pow(computed_ao, 0.7);
+                    computed_ao = pow(computed_ao, 0.7); 
                     computed_ao = lerp(computed_ao, 1, 0);  //rate = 0 -> 来自cb0[1].w 
 
                     uint AO_blend_Type = (0 == 1); //其中 1 来自 cb0[9].x 
-                    half min_of_texao_and_ssao = min(df.w, ao); //min(Tex_AO, SSAO)
+                    half min_of_texao_and_ssao = min(df.w, ao); //min(Tex_AO, SSAO) 
                     half min_of_3_ao = min(computed_ao, min_of_texao_and_ssao); 
-                    half mul_of_compao_and_minao = computed_ao * min_of_texao_and_ssao;
-                    half AO_final = AO_blend_Type ? min_of_3_ao : mul_of_compao_and_minao;
+                    half mul_of_compao_and_minao = computed_ao * min_of_texao_and_ssao; 
+                    half AO_final = AO_blend_Type ? min_of_3_ao : mul_of_compao_and_minao; 
+
+                    uint4 matCondi2 = condi.xxxx == uint4(6, 2, 3, 7).xyzw; 
+                    half3 baseCol_1 = half3(0, 0, 0); //非 #6 号渲染通路使用0默认值 
+                    if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 baseCol_1 
+                    {
+                        half4 neg_norm = half4(-norm.xyz, 1); 
+                        half3 bias_neg_norm1 = mul(M_CB1_181, neg_norm); 
+                        neg_norm = norm.yzzx * norm.xyzz; 
+                        half3 bias_neg_norm2 = mul(M_CB1_184, neg_norm); 
+                        
+                        //baseCol * scale + bias
+                        baseCol_1 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2); 
+                    }
 
 
                     test.x = AO_final;
