@@ -261,7 +261,7 @@ Shader "Kena/KenaGI"
                         half3 bias_neg_norm1 = mul(M_CB1_181, neg_norm); 
                         neg_norm = norm.yzzx * norm.xyzz; 
                         half3 bias_neg_norm2 = mul(M_CB1_184, neg_norm); 
-                        //base_disturb * scale + bias
+                        //base_disturb * scale + bias 
                         disturb_1 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2); 
                         disturb_1 = V_CB1_180 * max(disturb_1, half3(0, 0, 0)); 
                         //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
@@ -269,9 +269,9 @@ Shader "Kena/KenaGI"
                     }
 
                     tmp1 = matCondi2.y | matCondi2.z; //#2 或 #3 号渲染通道 
-                    R15 = tmp1 ? (frxxPow2 + R15) : R15;
+                    R15 = tmp1 ? (frxxPow2 + R15) : R15; 
 
-                    if (matCondi2.w)
+                    if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse 
                     {
 
                     }
