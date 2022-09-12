@@ -271,6 +271,10 @@ Shader "Kena/KenaGI"
                     tmp1 = matCondi2.y | matCondi2.z; //#2 ªÚ #3 ∫≈‰÷»æÕ®µ¿ 
                     R15 = tmp1 ? (frxxPow2 + R15) : R15;
 
+                    if (matCondi2.w)
+                    {
+
+                    }
 
 
                     test.x = AO_final;
