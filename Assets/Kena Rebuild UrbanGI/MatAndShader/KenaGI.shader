@@ -273,6 +273,10 @@ Shader "Kena/KenaGI"
 
                     if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse 
                     {
+                        half3 refractDir = normalize(NoV * (-norm) + ViewDir); 
+                        half rough_7 = min(1.0, max(rifr.w, 0.003922));
+                        half3 RoV = dot(refractDir, -ViewDir);
+                        half3 RoN = dot(refractDir, norm);
 
                     }
 
