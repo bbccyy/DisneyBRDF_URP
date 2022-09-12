@@ -78,6 +78,7 @@ Shader "Kena/KenaGI"
                 float4(0, 0, 0, 1)
                 );
 
+            static float3 V_CB1_180 = float3(4.949999809, 4.192022324, 3.122247696);
             static float3 V_CB1_187 = float3(-0.016062476, -0.010786114, -0.003302935);
 
             static float3 camPosWS = float3(-58890.16015625, 27509.392578125, -6150.4560546875);
@@ -104,6 +105,9 @@ Shader "Kena/KenaGI"
             half4 frag (v2f IN) : SV_Target
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(IN);
+                
+                half tmp1 = 0; 
+                half2 tmp2 = half2(0, 0);
 
                 half2 suv = IN.vertex.xy * screen_param.zw;     //screen uv 
                 half2 coord = (IN.vertex.xy * screen_param.zw - 0.5) * IN.vertex.w * 2.0;  //[-1, +1] 
@@ -206,7 +210,7 @@ Shader "Kena/KenaGI"
 
                 //利用(全局法线 & 深度)的差异做扰动，求颜色 R13 
                 //首先下面基于屏幕像素索引的“奇偶”性，组合出一定随机特性的屏幕空间纹理 
-                half2 tmp2 = 1 - delta_half_pixels; 
+                tmp2 = 1 - delta_half_pixels; 
                 half4 scr_pat = half4(tmp2.x * tmp2.y, 
                     delta_half_pixels * tmp2, 
                     delta_half_pixels.x * delta_half_pixels.y); 
@@ -249,22 +253,29 @@ Shader "Kena/KenaGI"
                     half AO_final = AO_blend_Type ? min_of_3_ao : mul_of_compao_and_minao; 
 
                     uint4 matCondi2 = condi.xxxx == uint4(6, 2, 3, 7).xyzw; 
-                    half3 baseCol_1 = half3(0, 0, 0); //非 #6 号渲染通路使用0默认值 
-                    if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 baseCol_1 
+                    half3 frxxPow2 = frxx_condi.xyz * frxx_condi.xyz;  //不明白这样处理纹理的原因,但是该数值与材质本身关联 
+                    half3 disturb_1 = half3(0, 0, 0); //非 #6 号渲染通路使用0默认值 
+                    if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 disturb_1 
                     {
                         half4 neg_norm = half4(-norm.xyz, 1); 
                         half3 bias_neg_norm1 = mul(M_CB1_181, neg_norm); 
                         neg_norm = norm.yzzx * norm.xyzz; 
                         half3 bias_neg_norm2 = mul(M_CB1_184, neg_norm); 
-                        
-                        //baseCol * scale + bias
-                        baseCol_1 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2); 
+                        //base_disturb * scale + bias
+                        disturb_1 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2); 
+                        disturb_1 = V_CB1_180 * max(disturb_1, half3(0, 0, 0)); 
+                        //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
+                        disturb_1 = AO_final * disturb_1 * frxxPow2; 
                     }
+
+                    tmp1 = matCondi2.y | matCondi2.z; //#2 或 #3 号渲染通道 
+                    R15 = tmp1 ? (frxxPow2 + R15) : R15;
+
 
 
                     test.x = AO_final;
                 }
-                else //对于 #0 号 渲染通道 
+                else //对于 #0 号 渲染通道  
                 {
 
                 }
