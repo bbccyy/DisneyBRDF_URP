@@ -298,7 +298,10 @@ Shader "Kena/KenaGI"
                         tmp1 = dot(V_hori, V_hori) * dot(refractDirRaw, refractDirRaw) + 0.0001;
                         tmp1 = RefrawDotHori* (1.0 / sqrt(tmp1)); //相当于求 |V_hori| * |RefracRaw|的倒数  
                         tmp1 = RefrawDotHori* tmp1; // AdotB/(|A|*|B|) -> cos<AB> -> cos(V_hori和Refract的夹角) 
-                        half4(0.5, 17.0, 0, 0) * tmp1 + half4(0.5, -16.780001, 0, 0)
+                        //以下可以看做是对cosθ的两种不同range调整  
+                        half2 cos_VhroiToRefract_adjust2 = half2(0.5, 17.0) * tmp1 + half2(0.5, -16.780001); 
+                        cos_VhroiToRefract_adjust2.x = saturate(cos_VhroiToRefract_adjust2.x);
+                        tmp2.y = sqrt(cos_VhroiToRefract_adjust2.x); 
                     }
 
 
