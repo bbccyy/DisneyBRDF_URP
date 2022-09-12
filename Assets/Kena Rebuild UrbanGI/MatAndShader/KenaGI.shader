@@ -312,8 +312,14 @@ Shader "Kena/KenaGI"
                         half factor_NoV = -0.069943 * NoV;
                         half twist = factor_HroiToRefract* sin_NV + factor_NoV;  //似乎是对朝向的旋转 
 
-                        rough_factor_1 = tmp1* rough_factor_1;
-                        half2(1.414214, 3.544908)* rough_factor_1; //(sqrt(2), 2*sqrt(π)) 
+                        rough_factor_1 = tmp1* rough_factor_1; 
+                        tmp2 = half2(1.414214, 3.544908)* rough_factor_1; //(sqrt(2), 2*sqrt(π)) 
+
+                        half R5Z = (NoV + RoN) - (-0.139886) * twist;
+                        R5Z = -0.5 * R5Z * R5Z;
+                        R5Z = R5Z / (tmp2.x* tmp2.x);
+                        tmp1 = tmp1 * exp(R5Z) / tmp2.y;
+
                     }
 
 
