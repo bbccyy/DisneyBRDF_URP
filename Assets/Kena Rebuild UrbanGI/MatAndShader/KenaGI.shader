@@ -300,8 +300,20 @@ Shader "Kena/KenaGI"
                         tmp1 = RefrawDotHori* tmp1; // AdotB/(|A|*|B|) -> cos<AB> -> cos(V_hori和Refract的夹角) 
                         //以下可以看做是对cosθ的两种不同range调整  
                         half2 cos_VhroiToRefract_adjust2 = half2(0.5, 17.0) * tmp1 + half2(0.5, -16.780001); 
-                        cos_VhroiToRefract_adjust2.x = saturate(cos_VhroiToRefract_adjust2.x);
-                        tmp2.y = sqrt(cos_VhroiToRefract_adjust2.x); 
+                        cos_VhroiToRefract_adjust2.x = saturate(cos_VhroiToRefract_adjust2.x); 
+                        tmp1 = sqrt(cos_VhroiToRefract_adjust2.x);
+
+                        half rough_factor_1 = rough_7 * rough_7; 
+                        half rough_factor_2 = rough_factor_1 * 2 + 0.2;
+                        rough_factor_1 = rough_factor_1 + 0.2;
+
+                        half sin_NV = sqrt(1 - NoV * NoV); 
+                        half factor_HroiToRefract = 0.997551 * tmp1;
+                        half factor_NoV = -0.069943 * NoV;
+                        half twist = factor_HroiToRefract* sin_NV + factor_NoV;  //似乎是对朝向的旋转 
+
+                        rough_factor_1 = tmp1* rough_factor_1;
+                        half2(1.414214, 3.544908)* rough_factor_1; //(sqrt(2), 2*sqrt(π)) 
                     }
 
 
