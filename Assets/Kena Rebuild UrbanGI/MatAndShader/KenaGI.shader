@@ -283,17 +283,22 @@ Shader "Kena/KenaGI"
 
                     if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse 
                     {
-                        half3 refractDir = normalize( (NoV * (-norm) + viewDir) );
+                        half3 refractDirRaw = NoV * (-norm) + viewDir; 
+                        half3 refractDir = normalize(refractDirRaw); 
                         half rough_7 = min(1.0, max(rifr.w, 0.003922)); 
-                        half3 RoV = dot(refractDir, -viewDir);
+                        half3 RoV = dot(refractDir, -viewDir); 
                         half3 RoN = dot(refractDir, norm); 
-                        half ang_NoV = acos(abs(NoV));
-                        half ang_RoN = acos(abs(RoN));
+                        half ang_NoV = acos(abs(NoV)); 
+                        half ang_RoN = acos(abs(RoN)); 
 
                         half cos_half_angle_V_Rneg = cos(abs(ang_NoV - ang_RoN) * 0.5); 
 
                         half3 V_hori = norm * (-RoN) + refractDir; //获得朝向折射方向的 "水平向量" 
-
+                        half RefrawDotHori = dot(V_hori, refractDirRaw);
+                        tmp1 = dot(V_hori, V_hori) * dot(refractDirRaw, refractDirRaw) + 0.0001;
+                        tmp1 = RefrawDotHori* (1.0 / sqrt(tmp1)); //相当于求 |V_hori| * |RefracRaw|的倒数  
+                        tmp1 = RefrawDotHori* tmp1; // AdotB/(|A|*|B|) -> cos<AB> -> cos(V_hori和Refract的夹角) 
+                        half4(0.5, 17.0, 0, 0) * tmp1 + half4(0.5, -16.780001, 0, 0)
                     }
 
 
