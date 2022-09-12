@@ -55,6 +55,22 @@ Shader "Kena/KenaGI"
             TEXTURECUBE(_IBL); SAMPLER(sampler_IBL);
             TEXTURECUBE(_Sky); SAMPLER(sampler_Sky);
 
+            static float pow5(float a)
+            {
+                float t = a * a;
+                return t * t * a;
+            }
+
+            static float acos(float a) {
+                float a2 = a * a;   // a squared
+                float a3 = a * a2;  // a cubed
+                if (a >= 0) {
+                    return (float)sqrt(1.0 - a) * (1.5707288 - 0.2121144 * a + 0.0742610 * a2 - 0.0187293 * a3);
+                }
+                return 3.14159265358979323846
+                    - (float)sqrt(1.0 + a) * (1.5707288 + 0.2121144 * a + 0.0742610 * a2 + 0.0187293 * a3);
+            }
+
             static float4 screen_param = float4(1708, 960, 1.0/1708, 1.0/960);  //这是截帧时的屏幕像素信息 
 
             static float4x4 M_Inv_VP = float4x4(
@@ -84,12 +100,6 @@ Shader "Kena/KenaGI"
             static float3 camPosWS = float3(-58890.16015625, 27509.392578125, -6150.4560546875);
 
             static float2 cb0_6 = float2(0.998231828212738, 0.998937487602233);
-
-            float pow5(float a)
-            {
-                float t = a * a;
-                return t * t * a;
-            }
 
             v2f vert (appdata IN)
             {
@@ -273,10 +283,16 @@ Shader "Kena/KenaGI"
 
                     if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse 
                     {
-                        half3 refractDir = normalize(NoV * (-norm) + ViewDir); 
-                        half rough_7 = min(1.0, max(rifr.w, 0.003922));
-                        half3 RoV = dot(refractDir, -ViewDir);
-                        half3 RoN = dot(refractDir, norm);
+                        half3 refractDir = normalize( (NoV * (-norm) + viewDir) );
+                        half rough_7 = min(1.0, max(rifr.w, 0.003922)); 
+                        half3 RoV = dot(refractDir, -viewDir);
+                        half3 RoN = dot(refractDir, norm); 
+                        half ang_NoV = acos(abs(NoV));
+                        half ang_RoN = acos(abs(RoN));
+
+                        half cos_half_angle_V_Rneg = cos(abs(ang_NoV - ang_RoN) * 0.5); 
+
+                        half3 V_hori = norm * (-RoN) + refractDir; //获得朝向折射方向的 "水平向量" 
 
                     }
 
