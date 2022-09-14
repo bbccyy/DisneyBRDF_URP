@@ -61,6 +61,11 @@ Shader "Kena/KenaGI"
                 return t * t * a;
             }
 
+            static float pow2(float a)
+            {
+                return a * a;
+            }
+
             static float acos(float a) {
                 float a2 = a * a;   // a squared
                 float a3 = a * a2;  // a cubed
@@ -263,25 +268,25 @@ Shader "Kena/KenaGI"
                     half AO_final = AO_blend_Type ? min_of_3_ao : mul_of_compao_and_minao; 
 
                     uint4 matCondi2 = condi.xxxx == uint4(6, 2, 3, 7).xyzw; 
-                    half3 frxxPow2 = frxx_condi.xyz * frxx_condi.xyz;  //不明白这样处理纹理的原因,但是该数值与材质本身关联 
-                    half3 disturb_1 = half3(0, 0, 0); //非 #6 号渲染通路使用0默认值 
-                    if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 disturb_1 
+                    half3 frxxPow2 = frxx_condi.xyz * frxx_condi.xyz;  //不明白这样处理纹理的原因,该数值与材质本身关联 
+                    half3 ao_diffuse = half3(0, 0, 0); //非 #6 号渲染通路使用0默认值 
+                    if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_diffuse 
                     {
                         half4 neg_norm = half4(-norm.xyz, 1); 
                         half3 bias_neg_norm1 = mul(M_CB1_181, neg_norm); 
                         neg_norm = norm.yzzx * norm.xyzz; 
                         half3 bias_neg_norm2 = mul(M_CB1_184, neg_norm); 
                         //base_disturb * scale + bias 
-                        disturb_1 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2); 
-                        disturb_1 = V_CB1_180 * max(disturb_1, half3(0, 0, 0)); 
+                        ao_diffuse = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2);
+                        ao_diffuse = V_CB1_180 * max(ao_diffuse, half3(0, 0, 0));
                         //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
-                        disturb_1 = AO_final * disturb_1 * frxxPow2; 
+                        ao_diffuse = AO_final * ao_diffuse * frxxPow2;
                     }
 
                     tmp1 = matCondi2.y | matCondi2.z; //#2 或 #3 号渲染通道 
-                    R15 = tmp1 ? (frxxPow2 + R15) : R15; 
+                    R15 = tmp1 ? (frxxPow2 + R15) : R15;   //base_diffuse 
 
-                    if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse 
+                    if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse -> 覆盖到 R15.xyz  
                     {
                         half3 refractDirRaw = NoV * (-norm) + viewDir; 
                         half3 refractDir = normalize(refractDirRaw); 
@@ -291,9 +296,9 @@ Shader "Kena/KenaGI"
                         half ang_NoV = acos(abs(NoV)); 
                         half ang_RoN = acos(abs(RoN)); 
 
-                        half cos_half_angle_V_Rneg = cos(abs(ang_NoV - ang_RoN) * 0.5); 
+                        half cos_half_angle_VtoRneg = cos(abs(ang_NoV - ang_RoN) * 0.5); 
 
-                        half3 V_hori = norm * (-RoN) + refractDir; //获得朝向折射方向的 "水平向量" 
+                        half3 V_hori = norm * (-RoN) + refractDir; //获得朝向折射方向的 "水平向量" -> Vector_Horizontal 
                         half RefrawDotHori = dot(V_hori, refractDirRaw);
                         tmp1 = dot(V_hori, V_hori) * dot(refractDirRaw, refractDirRaw) + 0.0001;
                         tmp1 = RefrawDotHori* (1.0 / sqrt(tmp1)); //相当于求 |V_hori| * |RefracRaw|的倒数  
@@ -313,14 +318,42 @@ Shader "Kena/KenaGI"
                         half twist = factor_HroiToRefract* sin_NV + factor_NoV;  //似乎是对朝向的旋转 
 
                         rough_factor_1 = tmp1* rough_factor_1; 
-                        tmp2 = half2(1.414214, 3.544908)* rough_factor_1; //(sqrt(2), 2*sqrt(π)) 
+                        tmp2 = half2(1.414214, 3.544908)* rough_factor_1; //数值->(sqrt(2), 2*sqrt(π)) 
 
-                        half R5Z = (NoV + RoN) - (-0.139886) * twist;
-                        R5Z = -0.5 * R5Z * R5Z;
-                        R5Z = R5Z / (tmp2.x* tmp2.x);
-                        tmp1 = tmp1 * exp(R5Z) / tmp2.y;
+                        half R5Z = (NoV + RoN) - (-0.139886) * twist; //记为 R5Z 
+                        R5Z = -0.5 * R5Z * R5Z; 
+                        R5Z = R5Z / (tmp2.x* tmp2.x); 
+                        // exp(-0.5 * R5Z^2 / (2*cos_VhoR*(roughness^2+0.2)^2)) / (2sqrt(π)*sqrt(cos_VhoR)*(roughness^2 + 0.2)) 
+                        // 其中 R5Z = (NdotV + RoN)-(-0.139886)*(0.997*sqrt(cos_VhroiToRefract)*sinθ-0.069943*cosθ) 
+                        R5Z = exp(R5Z) / tmp2.y; 
+                        tmp1 = tmp1 * R5Z; // sqrt(cos_VhoR*0.5+0.5) * (上式) -> 记为 R5Z' 
 
+                        tmp1 = tmp1 * (0.953479 * pow5(1 - sqrt(satruate(RoV * 0.5 + 0.5))) + 0.046521); 
+                        half R1Y = 0.5 * R10.w * tmp1;   //记为R1Y TODO: 给个名字? 
+
+                        half RoV_po = saturate(-RoV); 
+                        half factor_RoV = 1 - RoV_po;   //当掠射或垂直时得0，当视线成45度角时得最大值0.3左右 
+
+                        tmp1 = exp((-0.5 * pow2(NoV - 0.14)) / pow2(rough_factor_2)) / (rough_factor_2 * 2.506628); //2.506=sqrt(2π) 
+
+                        half R10W = 0.953479 * pow5(1 - 0.5 * cos_half_angle_VtoRneg) + 0.046521;  //颜色强度 or AO 关联值 
+                        R10W = pow2(1 - R10W) * R10W; 
+                        //TODO: 确认如下使用exp还是exp2  bh 
+                        half3 df_chan7 = exp(log(R10.xyz) * (0.8 / cos_half_angle_VtoRneg));  // #7 渲染通道使用的 df，经过了调整 
+                        df_chan7 = df_chan7* tmp1* exp(cos_VhroiToRefract_adjust2.y)* R10W + factor_RoV * R1Y; 
+
+                        tmp1 = lerp(min(0.25 * (1 + dot(refractDir, refractDir)), 1.0), (1 - abs(RoN)), 0.33) * factor_RoughOrZero * 0.318310;
+                        
+                        R10.xyz = sqrt(R10.xyz) * tmp1 + df_chan7; 
+                        R10.xyz = min(-R10.xyz, half3(0, 0, 0)); //结合下面乘 -π -> 这一步作用是抹去负数 
+                        R15.xyz = R10.xyz * half3(-3.141593, -3.141593, -3.141593); //π * (由折射夹角和粗糙度系数等换算出来的新df) -> 一种基础漫反射 
                     }
+
+                    uint is8 = condi.x == uint(8);
+
+
+
+
 
 
                     test.x = AO_final;
