@@ -102,6 +102,9 @@ Shader "Kena/KenaGI"
             static float3 V_CB1_180 = float3(4.949999809, 4.192022324, 3.122247696);
             static float3 V_CB1_187 = float3(-0.016062476, -0.010786114, -0.003302935);
 
+            static float3 V_CB0_1 = float3(0.045186203, 0.051269457, 0.029556833);
+
+
             static float3 camPosWS = float3(-58890.16015625, 27509.392578125, -6150.4560546875);
 
             static float2 cb0_6 = float2(0.998231828212738, 0.998937487602233);
@@ -121,6 +124,7 @@ Shader "Kena/KenaGI"
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(IN);
                 
+                half4 output = half4(0, 0, 0, 0);
                 half tmp1 = 0; 
                 half2 tmp2 = half2(0, 0);
 
@@ -363,19 +367,35 @@ Shader "Kena/KenaGI"
                     ao_diffuse_common = V_CB1_180 * max(ao_diffuse_common, half3(0, 0, 0));
 
                     //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
-                    ao_diffuse_common = AO_final * ao_diffuse * frxxPow2;
+                    ao_diffuse_common = AO_from_RN * AO_final * ao_diffuse_common + V_CB0_1 * (1 - AO_final);
 
+                    R10.xyz = R10.xyz * ao_diffuse_common + ao_diffuse_from_6;  //这是个颜色, 推测为完整的 Diffuse 
 
-
-
-
+                    half intense = dot(half3(0.3, 0.59, 0.11), R10.xyz);
+                    half check = 1.0 == 0;      //返回false -> 相当于关闭了alpha通道 -> cb1[200].z == 0 ?
+                    tmp1 = check & intense;     //光强度与flag求and -> 要求强度大于0且开启了flag 
+                    tmp1 = tmp1 & is9or5;       //在前面的基础上还要求是 #9或#5号渲染通道 -> check 才为 true(1) 
+                    output.w = tmp1 & check;    //此处返回恒为 0 
 
                     test.x = AO_final;
                 }
                 else //对于 #0 号 渲染通道  
                 {
-
+                    R10 = half4(0, 0, 0, 0);
+                    output.w = 0;
                 }
+
+                //TODO 
+
+
+
+
+
+
+
+
+
+
 
 
 
