@@ -246,15 +246,14 @@ Shader "Kena/KenaGI"
                     //R12和R10颜色都是黑白噪点下显示人物本体Diffuse的贴图，区别在于R12对D图施加了NoV和Fresnel，而R10是直白的D图 
                     half3 R15 = matCondi.z ? (R12 - R12 * factor_RoughOrZero) : (R10 - R10 * factor_RoughOrZero); 
                     //RN 来自 _GNorm 贴图，经多次采样和叠加而得，推测是某种小范围随机和模糊后的N -> RandomNorm(或RN) 
-                    half RN = dot(d_norm, d_norm); 
-                    half RN_Len = sqrt(RN); 
-                    RN = d_norm / max(RN_Len, 0.00001); 
+                    half RN_Len = sqrt(dot(d_norm, d_norm));
+                    half3 RN = d_norm / max(RN_Len, 0.00001);
                     
                     //计算AO_from_RN 
-                    half bias_N = (norm - RN) * RN_Len + RN; //让RN朝着Norm的方向偏折一定距离 -> r17.xyz 
+                    half3 bias_N = (norm - RN) * RN_Len + RN; //让RN朝着Norm的方向偏折一定距离 -> r17.xyz (第一类r17)
                     half RNoN = dot(RN, norm); 
                     //TODO:这个AO项计算方式可摘录 
-                    half AO_from_RN = RN_Len * (1 - RNoN) + RNoN;  //通过全局法线纹理获得的AO -> r11.w 
+                    half AO_from_RN = lerp(RNoN, 1, RN_Len);  //通过全局法线纹理获得的AO -> r11.w 
 
                     //计算AO_final, 备注:log2_n = 1.442695 * ln_n 
                     half computed_ao = saturate(40.008 /(exp(-0.01*(RN_Len * 10.0 - 5))+1) - 19.504); 
@@ -269,18 +268,19 @@ Shader "Kena/KenaGI"
 
                     uint4 matCondi2 = condi.xxxx == uint4(6, 2, 3, 7).xyzw; 
                     half3 frxxPow2 = frxx_condi.xyz * frxx_condi.xyz;  //不明白这样处理纹理的原因,该数值与材质本身关联 
-                    half3 ao_diffuse = half3(0, 0, 0); //非 #6 号渲染通路使用0默认值 
-                    if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_diffuse 
+                    half3 ao_diffuse_from_6 = half3(0, 0, 0); 
+                    half3 ao_diffuse_common = half3(0, 0, 0); //非 #6 号渲染通路也会在后面用类似如下的方法计算 common 变量 
+                    if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_diffuse_from_6 
                     {
                         half4 neg_norm = half4(-norm.xyz, 1); 
                         half3 bias_neg_norm1 = mul(M_CB1_181, neg_norm); 
                         neg_norm = norm.yzzx * norm.xyzz; 
                         half3 bias_neg_norm2 = mul(M_CB1_184, neg_norm); 
                         //base_disturb * scale + bias 
-                        ao_diffuse = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2);
-                        ao_diffuse = V_CB1_180 * max(ao_diffuse, half3(0, 0, 0));
+                        ao_diffuse_from_6 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2);
+                        ao_diffuse_from_6 = V_CB1_180 * max(ao_diffuse_from_6, half3(0, 0, 0));
                         //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
-                        ao_diffuse = AO_final * ao_diffuse * frxxPow2;
+                        ao_diffuse_from_6 = AO_final * ao_diffuse_from_6 * frxxPow2;
                     }
 
                     tmp1 = matCondi2.y | matCondi2.z; //#2 或 #3 号渲染通道 
@@ -289,7 +289,7 @@ Shader "Kena/KenaGI"
                     if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse -> 覆盖到 R15.xyz  
                     {
                         half3 refractDirRaw = NoV * (-norm) + viewDir; 
-                        half3 refractDir = normalize(refractDirRaw); 
+                        half3 refractDir = normalize(refractDirRaw);  // ->r17.xyz (第二类r17) 
                         half rough_7 = min(1.0, max(rifr.w, 0.003922)); 
                         half3 RoV = dot(refractDir, -viewDir); 
                         half3 RoN = dot(refractDir, norm); 
@@ -350,6 +350,20 @@ Shader "Kena/KenaGI"
                     }
 
                     uint is8 = condi.x == uint(8);
+                    R10.xyz = frxxPow2.xyz * frxx_condi.w + R15.xyz; 
+                    R10.xyz = is8 ? R10.xyz : R15.xyz; 
+
+                    //以下逻辑与之前处理 #6 渲染通道时雷同 
+                    half4 biasN = half4(bias_N.xyz, 1.0); 
+                    half3 bias_biasN = mul(M_CB1_181, biasN); 
+                    half4 mixN = biasN.yzzx * biasN.xyzz; 
+                    half3 bias_mixN = mul(M_CB1_184, mixN);
+                    //base_disturb * scale + bias 
+                    ao_diffuse_common = V_CB1_187 * (biasN.x * biasN.x - biasN.y * biasN.y) + (bias_biasN + bias_mixN);
+                    ao_diffuse_common = V_CB1_180 * max(ao_diffuse_common, half3(0, 0, 0));
+
+                    //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
+                    ao_diffuse_common = AO_final * ao_diffuse * frxxPow2;
 
 
 
