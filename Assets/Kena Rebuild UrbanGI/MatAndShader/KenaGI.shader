@@ -385,10 +385,16 @@ Shader "Kena/KenaGI"
                     output.w = 0;
                 }
 
-                //TODO 
-                  
+                uint2 is0or7 = condi.xxx != uint2(0, 7).xy;
+                if ((is0or7.x & is0or7.y) != 0)  //既不是 #0号 也不是 #7 号渲染通道 
+                {
+                    //TODO GI_Spec 部分在此 
 
-
+                }
+                else
+                {
+                    //o0.xyz = R10颜色 
+                }
 
 
 
