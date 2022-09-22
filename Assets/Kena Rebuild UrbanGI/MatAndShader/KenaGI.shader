@@ -88,7 +88,7 @@ Shader "Kena/KenaGI"
             }
 
             static float4 screen_param = float4(1708, 960, 1.0/1708, 1.0/960);  //这是截帧时的屏幕像素信息 
-
+            //37 15 13&12 + 341 = 353/4:13 356:9 378:17 -> 选12/13,353/354,13
             static float4x4 M_Inv_VP = float4x4(
                 float4(0.67306363582611, 0.116760797798633, -0.509014785289764, -58890.16015625),
                 float4(-0.465476632118225, 0.168832123279571, -0.736369132995605, 27509.392578125),
@@ -119,6 +119,11 @@ Shader "Kena/KenaGI"
             static float3 camPosWS = float3(-58890.16015625, 27509.392578125, -6150.4560546875);
 
             static float2 cb0_6 = float2(0.998231828212738, 0.998937487602233);
+
+            static float4 cb4_12 = float4(-55666.63672, 27997.91406, -6577.694336, 1296.551636);
+            static float4 cb4_353 = float4(1, 13, 0, 0);
+
+
 
             v2f vert (appdata IN)
             {
@@ -151,10 +156,10 @@ Shader "Kena/KenaGI"
                 half4 hclip = half4(coord.xy, d, 1);
 
                 //use matrix_Inv_VP to rebuild posWS 
-                half4 posWS = mul(M_Inv_VP, hclip);
+                half4 posWS = mul(M_Inv_VP, hclip);  //注意此时单位还是 "厘米" 
 
-                //ViewDir (使用时取反: 从视点触发指向摄像机)
-                half3 viewDir = normalize(posWS.xyz - camPosWS);
+                //ViewDir (使用时取反: 从视点触发指向摄像机) 
+                half3 viewDir = normalize(posWS.xyz - camPosWS); 
 
                 //Sample Normal 
                 half3 n = SAMPLE_TEXTURE2D(_Norm, sampler_Norm, suv); 
@@ -436,8 +441,8 @@ Shader "Kena/KenaGI"
                     //下面跳过了使用map_Idx来获取索引的步骤 -> 这不重要 
                     //ld_indexable(buffer)(uint,uint,uint,uint) ret_from_t3_buffer_1, map_Idx_1, t3.x 
                     //ld_indexable(buffer)(uint,uint,uint,uint) ret_from_t3_buffer_2, map_Idx_2, t3.x 
-                    uint ret_from_t3_buffer_1 = 1;  //r0.w -> 用于控制循环计算不同IBL环境光贴图的次数 -> 一般为1 
-                    uint ret_from_t3_buffer_2 = 0;  //r0.z -> 用于辅助定位IBL贴图在贴图队列中的位置 -> 可为[0,1,...] 
+                    uint ret_from_t3_buffer_1 = 1;  //r0.w -> 用于控制循环计算不同IBL环境光贴图的次数 -> 可为[0,1,..7] 
+                    uint ret_from_t3_buffer_2 = 1;  //r0.z -> 用于辅助定位IBL贴图在贴图队列中的位置 -> 可为[0,1,..7] 
 
                     uint is6 = condi.x == uint(6);  //是否是 #6 渲染通道 
                     half norm_shift_intensity = 0   //该参数和GI_Spec_Base是下面逻辑分支的主要计算目标 
@@ -483,9 +488,22 @@ Shader "Kena/KenaGI"
                     //推测是依据距离远景和是否处于屏幕中心，判断是否要开启当前像素的环境光贴图采样逻辑 
                     //此外 masked_AOwthRoughNoise 本身是后棋盘装mask和多重AO以及Rough计算出的"高频细节" 
                     //其作为循环判断之一也能阻止一部分像素进入IBL采样循环 
-                    UNITY_UNROLL(1) for (uint i = 0; i < ret_from_t3_buffer_1 && threshold >= 0.001; i++)
+                    UNITY_UNROLL(1) for (uint i = 0; i < ret_from_t3_buffer_1 && threshold >= 0.001; i++) 
                     {
                         //判断当前场景‘激活’的IBL探针，如果当前像素点能被某张IBL影响，则进入内部 if 分支执行逻辑 
+                        uint tb4_idx = i + ret_from_t3_buffer_2;
+                        //下面跳过了使用 tb4_idx 来获取索引的步骤 -> t4和t3一样，也是张映射表 
+                        //ld_indexable(buffer)(short,short,short,short) out, tb4_idx, t4.x  -> 使用tb4_idx=[0-8]采样返回都是"6" 
+                        //这里使用视检过的"正确值" -> out = 12 来替代 
+                        half3 v_PixelToProbe = posWS - cb4_12.xyz; 
+                        half d_PixelToProbe_square = dot(d_PixelToProbe, d_PixelToProbe);
+                        half d_PixelToProbe = sqrt(d_PixelToProbe_square);
+                        if (d_PixelToProbe < cb4_12.w)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
+                        {
+                            half d_rate = saturate(d_PixelToProbe / cb4_12.w); //距离影响因子 
+                            half VRLoP2P = dot(VR_lift, v_PixelToProbe);
+                            tmp1 = pow2(VRLoP2P) - (d_PixelToProbe_square - pow2(cb4_12.w)); 
+                        }
                     }
 
                 }
