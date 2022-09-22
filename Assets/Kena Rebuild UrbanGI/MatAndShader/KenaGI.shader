@@ -307,8 +307,8 @@ Shader "Kena/KenaGI"
                         half rough_7 = min(1.0, max(rifr.w, 0.003922)); 
                         half3 RoV = dot(refractDir, -viewDir); 
                         half3 RoN = dot(refractDir, norm); 
-                        half ang_NoV = acos(abs(NoV)); 
-                        half ang_RoN = acos(abs(RoN)); 
+                        half ang_NoV = acos(NoV); 
+                        half ang_RoN = acos(RoN); 
 
                         half cos_half_angle_VtoRneg = cos(abs(ang_NoV - ang_RoN) * 0.5); 
 
@@ -453,7 +453,8 @@ Shader "Kena/KenaGI"
                                 half RNoVRLift = dot(d_norm, VR_lift);
                                 half RN_raw_Len = max(RN_raw_Len, 0.001);
 
-                                //asin  aaa
+                                half asin_input = RNoVRLift / RN_raw_Len;
+                                asin(asin_input)
                             }
 
                         }
