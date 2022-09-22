@@ -28,6 +28,7 @@ Shader "Kena/KenaGI"
             #pragma fragment frag
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #define _pi 3.141593f
 
             struct appdata
             {
@@ -360,7 +361,7 @@ Shader "Kena/KenaGI"
                         
                         R10.xyz = sqrt(R10.xyz) * tmp1 + df_chan7; 
                         R10.xyz = min(-R10.xyz, half3(0, 0, 0)); //结合下面乘 -π -> 这一步作用是抹去负数 
-                        R15.xyz = R10.xyz * half3(-3.141593, -3.141593, -3.141593); //π * (由折射夹角和粗糙度系数等换算出来的新df) -> 一种基础漫反射 
+                        R15.xyz = R10.xyz * half3(-_pi, -_pi, -_pi); //π * (由折射夹角和粗糙度系数等换算出来的新df) -> 一种基础漫反射 
                     }
 
                     uint is8 = condi.x == uint(8);
@@ -449,12 +450,17 @@ Shader "Kena/KenaGI"
                             {
                                 //以下准备中间计算量 
                                 half rough_chan6 = max(rifr.w, 0.1);
-                                half pi_RN_raw_Len = 3.141593 * (RN_raw_Len * 1);
+                                //half pi_RN_raw_Len = _pi * (RN_raw_Len * 1);
                                 half RNoVRLift = dot(d_norm, VR_lift);
                                 half RN_raw_Len = max(RN_raw_Len, 0.001);
 
                                 half asin_input = RNoVRLift / RN_raw_Len;
-                                asin(asin_input)
+                                tmp2.x = asin(asin_input) - abs(_pi * rough_chan6 - _pi * RN_raw_Len);
+                                tmp2.y = (_pi * rough_chan6 + _pi * RN_raw_Len) - abs(_pi * rough_chan6 - _pi * RN_raw_Len);
+                                tmp1 = saturate(tmp2.x / tmp2.y);
+                                tmp1 = ((1.0 - tmp1) * (-2.0) + 3.0) * pow2(1.0 - tmp1);
+
+                                half aaa = saturate((_pi* RN_raw_Len - 0.1) * 5.0)* tmp1; //TODO 
                             }
 
                         }
