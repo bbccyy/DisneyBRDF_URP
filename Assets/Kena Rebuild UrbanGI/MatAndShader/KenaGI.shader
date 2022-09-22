@@ -428,7 +428,7 @@ Shader "Kena/KenaGI"
                     half mixed_ao = df.w * ao + NoV_sat; 
                     half AOwthRoughNoise = df.w * ao + exp(log(mixed_ao) * roughSquare);
                     AOwthRoughNoise = saturate(AOwthRoughNoise - 1);  //-> r0.y -> 只截取超过1的部分，这部分可以看做是AO叠加上Rough后的高频噪声 
-                    half masked_AOwthRoughNoise = spec_add.w * AOwthRoughNoise;
+                    half masked_AOwthRoughNoise = spec_add.w * AOwthRoughNoise; //推测为spec特殊底噪 
 
                     //以下逻辑用于计算索引 -> 最终用于获取IBL贴图 
                     uint2 screenPixelXY = uint2(IN.vertex.xy);
@@ -483,6 +483,7 @@ Shader "Kena/KenaGI"
 
                     half lod_lv = 6 - (1.0 - 1.2 * log(rifr.w));  //与粗糙度有关的采样LOD等级，魔法数字6来自cb0 
                     half threshold = masked_AOwthRoughNoise;
+                    half3 ibl_spec_output = half3(0, 0, 0);  //这是如下for循环的主要输出 
                     //注意: ret_from_t3_buffer_1是使用‘屏幕像素’与‘距离对数’组合出索引 -> 再从 T3 buffer 中取得的映射值 
                     //该映射返回值的取值范围要么是 0, 要么 1 
                     //推测是依据距离远景和是否处于屏幕中心，判断是否要开启当前像素的环境光贴图采样逻辑 
@@ -507,12 +508,18 @@ Shader "Kena/KenaGI"
                             tmp1 = max(2.5 * d_rate - 1.5, 0);  //如果 (像素到探针的距离 / 探针影响半径R) < 0.6 -> 上式一律返回 0 
                             half rate_factor = 1.0 - (3.0 - 2.0 * tmp1) * pow2(tmp1); //距离缩放因子 
                             //shifted_p2p_dir 是采样cubemap的方向指针 
-                            //IBL_cubemap_array的index由 cb4[12 + 341].y 获得，采样返回 "13"  
-
-
-
+                            //IBL_cubemap_array的index由 cb4[12 + 341].y 获得，当前值为 "13"  
+                            //注意，由于没有以Cubemap_array形式导入原始资源，故如下采样的uv参数中没有第四维(array索引) 
+                            half4 ibl_raw = SAMPLE_TEXTURECUBE_LOD(_IBL, sampler_IBL, shifted_p2p_dir, lod_lv).rgba;
+                            //更新 ibl_spec_output
+                            ibl_spec_output = (cb4_353.x * ibl_raw.rgb)* rate_factor* threshold* norm_shift_intensity + ibl_spec_output;  
+                            //更新 threshold -> masked_AOwthRoughNoise 
+                            threshold = threshold * (1.0 - rate_factor * ibl_raw.a); 
                         }
                     }
+                    //TODO 
+
+
 
                 }
                 else
