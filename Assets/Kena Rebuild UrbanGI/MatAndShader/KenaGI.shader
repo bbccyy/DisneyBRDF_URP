@@ -496,13 +496,21 @@ Shader "Kena/KenaGI"
                         //ld_indexable(buffer)(short,short,short,short) out, tb4_idx, t4.x  -> 使用tb4_idx=[0-8]采样返回都是"6" 
                         //这里使用视检过的"正确值" -> out = 12 来替代 
                         half3 v_PixelToProbe = posWS - cb4_12.xyz; 
-                        half d_PixelToProbe_square = dot(d_PixelToProbe, d_PixelToProbe);
-                        half d_PixelToProbe = sqrt(d_PixelToProbe_square);
+                        half d_PixelToProbe_square = dot(d_PixelToProbe, d_PixelToProbe); 
+                        half d_PixelToProbe = sqrt(d_PixelToProbe_square); 
                         if (d_PixelToProbe < cb4_12.w)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
                         {
-                            half d_rate = saturate(d_PixelToProbe / cb4_12.w); //距离影响因子 
-                            half VRLoP2P = dot(VR_lift, v_PixelToProbe);
-                            tmp1 = pow2(VRLoP2P) - (d_PixelToProbe_square - pow2(cb4_12.w)); 
+                            half d_rate = saturate(d_PixelToProbe / cb4_12.w); //距离占比  
+                            half VRLoP2P = dot(VR_lift, v_PixelToProbe); 
+                            //下式形式为: Scale * VR_lift + v_PixelToProbe - [200,0,0] 
+                            half3 shifted_p2p_dir = (sqrt(pow2(VRLoP2P) - (d_PixelToProbe_square - pow2(cb4_12.w))) - VRLoP2P) * VR_lift + v_PixelToProbe - half3(200, 0, 0);
+                            tmp1 = max(2.5 * d_rate - 1.5, 0);  //如果 (像素到探针的距离 / 探针影响半径R) < 0.6 -> 上式一律返回 0 
+                            half rate_factor = 1.0 - (3.0 - 2.0 * tmp1) * pow2(tmp1); //距离缩放因子 
+                            //shifted_p2p_dir 是采样cubemap的方向指针 
+                            //IBL_cubemap_array的index由 cb4[12 + 341].y 获得，采样返回 "13"  
+
+
+
                         }
                     }
 
