@@ -531,9 +531,14 @@ Shader "Kena/KenaGI"
 
                     if (matCondi.z) //对 #4 号渲染通道来说，spec需要很多额外处理 
                     {
+                        half2 lut_uv_1 = half2(NoV_sat, rifr.w);//这是第一组lut_uv，rifr.w->对应粗糙度rough2 
+                        half2 lut_raw_1 = SAMPLE_TEXTURE2D(_LUT, sampler_LUT, lut_uv_1);
+                        half shifted_lut_bias = saturate(df_base.y * 50.0) * lut_raw_1.y * (1.0 - frxx_condi.x);
+                        half3 comb_spec = prefilter_Specular * (df_base.xyz * lut_raw_1.x + shifted_lut_bias);
 
-
-
+                        half2 lut_uv_2 = half2(NoV_sat, frxx_condi.y); //这是第二组lut_uv，frxx_condi.y->对应粗糙度rough3 
+                        half2 lut_raw_2 = SAMPLE_TEXTURE2D(_LUT, sampler_LUT, lut_uv_2);
+                        tmp1 = frxx_condi.x * (0.4 * lut_raw_2.x + lut_raw_2.y);
                     }
                     else  //不是 #4，也不是 #0 和 #7 的所有其他渲染通道 
                     {
