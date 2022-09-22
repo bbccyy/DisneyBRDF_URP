@@ -511,14 +511,22 @@ Shader "Kena/KenaGI"
                             //IBL_cubemap_array的index由 cb4[12 + 341].y 获得，当前值为 "13"  
                             //注意，由于没有以Cubemap_array形式导入原始资源，故如下采样的uv参数中没有第四维(array索引) 
                             half4 ibl_raw = SAMPLE_TEXTURECUBE_LOD(_IBL, sampler_IBL, shifted_p2p_dir, lod_lv).rgba;
-                            //更新 ibl_spec_output
-                            ibl_spec_output = (cb4_353.x * ibl_raw.rgb)* rate_factor* threshold* norm_shift_intensity + ibl_spec_output;  
+                            //更新 ibl_spec_output 
+                            ibl_spec_output = (cb4_353.x * ibl_raw.rgb) * rate_factor * threshold * norm_shift_intensity + ibl_spec_output; 
                             //更新 threshold -> masked_AOwthRoughNoise 
                             threshold = threshold * (1.0 - rate_factor * ibl_raw.a); 
                         }
                     }
-                    //TODO 
 
+                    //以下分支用于采样天空盒颜色 
+                    if (true) 
+                    {
+                        half sky_lod = 1.8154297 - (1.0 - 1.2 * log(rifr.w)) - 1;
+                        half3 sky_raw = SAMPLE_TEXTURECUBE_LOD(_Sky, sampler_Sky, VR_lift, sky_lod).rgb;
+                        GI_Spec_Base = sky_raw * V_CB1_180 * norm_shift_intensity + GI_Spec_Base;
+                    }
+
+                    //TODO 
 
 
                 }
