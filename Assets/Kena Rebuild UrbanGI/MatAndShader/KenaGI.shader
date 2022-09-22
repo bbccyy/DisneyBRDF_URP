@@ -76,6 +76,16 @@ Shader "Kena/KenaGI"
                     - (float)sqrt(1.0 + a) * (1.5707288 + 0.2121144 * a + 0.0742610 * a2 + 0.0187293 * a3);
             }
 
+            static float asin(float a) {
+                float a2 = a * a;   // a squared
+                float a3 = a * a2;  // a cubed
+                if (a >= 0f) {
+                    return 1.5707963267948966
+                        - (float)Math.sqrt(1.0 - a) * (1.5707288 - 0.2121144 * a + 0.0742610 * a2 - 0.0187293 * a3);
+                }
+                return -1.5707963267948966 + (float)Math.sqrt(1.0 + a) * (1.5707288 + 0.2121144 * a + 0.0742610 * a2 + 0.0187293 * a3);
+            }
+
             static float4 screen_param = float4(1708, 960, 1.0/1708, 1.0/960);  //这是截帧时的屏幕像素信息 
 
             static float4x4 M_Inv_VP = float4x4(
@@ -332,7 +342,7 @@ Shader "Kena/KenaGI"
                         R5Z = exp(R5Z) / tmp2.y; 
                         tmp1 = tmp1 * R5Z; // sqrt(cos_VhoR*0.5+0.5) * (上式) -> 记为 R5Z' 
 
-                        tmp1 = tmp1 * (0.953479 * pow5(1 - sqrt(satruate(RoV * 0.5 + 0.5))) + 0.046521); 
+                        tmp1 = tmp1 * (0.953479 * pow5(1 - sqrt(saturate(RoV * 0.5 + 0.5))) + 0.046521); 
                         half R1Y = 0.5 * R10.w * tmp1;   //记为R1Y TODO: 给个名字? 
 
                         half RoV_po = saturate(-RoV); 
@@ -373,9 +383,9 @@ Shader "Kena/KenaGI"
 
                     half intense = dot(half3(0.3, 0.59, 0.11), R10.xyz);
                     half check = 1.0 == 0;      //返回false -> 相当于关闭了alpha通道 -> cb1[200].z == 0 ?
-                    tmp1 = check & intense;     //光强度与flag求and -> 要求强度大于0且开启了flag 
-                    tmp1 = tmp1 & is9or5;       //在前面的基础上还要求是 #9或#5号渲染通道 -> check 才为 true(1) 
-                    output.w = tmp1 & check;    //此处返回恒为 0 
+                    //光强度与flag求and -> 要求强度大于0且开启了flag 
+                    //在前面的基础上还要求是 #9或#5号渲染通道 -> check 才为 true(1) 
+                    output.w = half((uint(check) & uint(intense)) & is9or5);    //此处返回恒为 0 
 
                     test.x = AO_final;
                 }
@@ -388,7 +398,69 @@ Shader "Kena/KenaGI"
                 uint2 is0or7 = condi.xxx != uint2(0, 7).xy;
                 if ((is0or7.x & is0or7.y) != 0)  //既不是 #0号 也不是 #7 号渲染通道 
                 {
-                    //TODO GI_Spec 部分在此 
+                    //GI_Spec 部分在此 
+                    //首先依据是否是9or5号渲染通道，选择R11(环境光底色*方块Mask.y) 或 环境光底色作为新的 df_base(基础环境光底色) 
+                    df_base.xyz = is9or5 ? R11.xyz : df_base.xyz;  
+                    tmp1 = (frxx_condi.x * df_base.w + 1) * 0.08; //df_base.w是与rough和NoV有关的值，处于[-1,0]区间；frxx_condi.x作为遮罩用于屏蔽指定像素 
+                    R11.xyz = factor_RoughOrZero * (R12.xyz - tmp1.xxx) + tmp1.xxx; //R11颜色是基于R12颜色做的微调 
+                    df_base.xyz = matCondi.z ? R11.xyz : df_base.xyz;  //如果是 #4 渲染通道 设置 df_base 为 上面计算出来的R11颜色 
+                    half3 VR = (NoV + NoV) * norm + viewDir;  //View_Reflection -> VR:视线反射方向 
+                    half roughSquare = rifr.w* rifr.w;
+                    //下式对应函数图像 -> 可近似为开口朝向的二次曲线，过y轴正1，同时与x轴正负1相交 
+                    half rate = (roughSquare + sqrt(1 - roughSquare)) * (1 - roughSquare);  //约 0.63 -> 某种rate系数 
+                    half3 VR_lift = lerp(norm, VR, rate);  //暂且定义为‘上抬视反’(注:没有归一化) ，具体反射向量上抬角度受rough控制 -> 简言之越粗糙，反射视线越接近法线朝向 
+
+                    //使用屏幕UV采样 T12 -> 这张纹理看起来对水晶,金属扣环等物体做了处理 -> 疑似关联 spec -> 从后续逻辑看(xyz分量)推测是对高光项的线性的附加补充量 
+                    half4 spec_add_raw = SAMPLE_TEXTURE2D(_Spec, sampler_Spec, suv);
+                    half spec_mask = 1 - spec_add_raw.w;  //后续会作用到基于环境光贴图的高光重建过程中，作为强度遮罩 
+                    //如下可知 frxx_condi.x 非0既1 -> 当0时使用采样T12纹理的采样返回值(w分量会取反)；当1时xyz高光附加颜色分量置为0(而w通道被置为1) 
+                    half4 spec_add = matCondi.z ? (frxx_condi.x * half4(-spec_add_raw.xyz, spec_add_raw.w) + half4(spec_add_raw.xyz, spec_mask)) : half4(spec_add_raw.xyz, spec_mask);
+
+                    //如下输出的是被T12.w通道修正过的'AO噪声'高频部分系数 
+                    half mixed_ao = df.w * ao + NoV_sat; 
+                    half AOwthRoughNoise = df.w * ao + exp(log(mixed_ao) * roughSquare);
+                    AOwthRoughNoise = saturate(AOwthRoughNoise - 1);  //-> r0.y -> 只截取超过1的部分，这部分可以看做是AO叠加上Rough后的高频噪声 
+                    half masked_AOwthRoughNoise = spec_add.w * AOwthRoughNoise;
+
+                    //以下逻辑用于计算索引 -> 最终用于获取IBL贴图 
+                    uint2 screenPixelXY = uint2(IN.vertex.xy);
+                    uint logOfDepth = uint(max(log(d * 1 + 1) + 1, 0));  //大体上等于深度的对数 + 1 -> 剔除了太过接近的距离 
+                    uint curbed_logOfDepth = min(logOfDepth, uint(0));   //似乎只能返回 0? -> 注:上下行涉及常数部分均来自cb3 
+                    screenPixelXY = screenPixelXY >> 1;                  //相当于半屏幕像素索引 
+                    //((距离对数因子 * 1 + 半屏幕像素索引.v) * 1 + 半屏幕像素索引.u + 1) * 2 
+                    uint map_Idx_1 = ((curbed_logOfDepth * 1 + screenPixelXY.y) * 1 + screenPixelXY.x + 1) << 1; 
+                    uint map_Idx_2 = map_Idx_1 + 1; 
+                    //下面跳过了使用map_Idx来获取索引的步骤 -> 这不重要 
+                    //ld_indexable(buffer)(uint,uint,uint,uint) ret_from_t3_buffer_1, map_Idx_1, t3.x 
+                    //ld_indexable(buffer)(uint,uint,uint,uint) ret_from_t3_buffer_2, map_Idx_2, t3.x 
+                    uint ret_from_t3_buffer_1 = 1;  //r0.w -> 用于控制循环计算不同IBL环境光贴图的次数 -> 一般恒为1 
+                    uint ret_from_t3_buffer_2 = 0;  //r0.z -> 用于辅助定位IBL贴图在贴图队列中的位置 -> 可为[0,1,...] 
+
+                    uint is6 = condi.x == uint(6);  //是否是 #6 渲染通道 
+
+                    if (true)  //这条分支又cb[0].x 控制，总是可以进入 
+                    {
+                        half RN_raw_Len = sqrt(dot(d_norm, d_norm));
+                        //以下分支用于计算某种扰动强度 -> TODO 确定学界定义范畴 
+                        //计算过程中使用到了: |Rn_raw|, roughness, asin(dot(Rn,'上抬视反')/|Rn|) -> 推测为经验公式 
+                        if (true) //cb1[189].x 用十六进制解码后得 0x00000001 -> true 
+                        {
+                            if (is6) //处理 #6 渲染通道 
+                            {
+                                //以下准备中间计算量 
+                                half rough_chan6 = max(rifr.w, 0.1);
+                                half pi_RN_raw_Len = 3.141593 * (RN_raw_Len * 1);
+                                half RNoVRLift = dot(d_norm, VR_lift);
+                                half RN_raw_Len = max(RN_raw_Len, 0.001);
+
+                                //asin  aaa
+                            }
+
+                        }
+
+                    }
+
+
 
                 }
                 else
