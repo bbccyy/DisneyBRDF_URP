@@ -526,8 +526,19 @@ Shader "Kena/KenaGI"
                         GI_Spec_Base = sky_raw * V_CB1_180 * norm_shift_intensity + GI_Spec_Base;
                     }
 
-                    //TODO 
+                    half spec_AOwthRoughNoise = threshold;  //这里我给threshold重新命名，以免疑惑 
+                    half3 prefilter_Specular = (ibl_spec_output + GI_Spec_Base * spec_AOwthRoughNoise) * 1.0 + spec_add;
 
+                    if (matCondi.z) //对 #4 号渲染通道来说，spec需要很多额外处理 
+                    {
+
+
+
+                    }
+                    else  //不是 #4，也不是 #0 和 #7 的所有其他渲染通道 
+                    {
+
+                    }
 
                 }
                 else
