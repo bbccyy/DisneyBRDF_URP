@@ -399,7 +399,9 @@ Shader "Kena/KenaGI"
                 uint2 is0or7 = condi.xxx != uint2(0, 7).xy;
                 if ((is0or7.x & is0or7.y) != 0)  //既不是 #0号 也不是 #7 号渲染通道 
                 {
-                    //GI_Spec 部分在此 
+                    //GI_Spec 计算部分在此 
+                    half3 GI_Spec_Base = half3(0, 0, 0);
+
                     //首先依据是否是9or5号渲染通道，选择R11(环境光底色*方块Mask.y) 或 环境光底色作为新的 df_base(基础环境光底色) 
                     df_base.xyz = is9or5 ? R11.xyz : df_base.xyz;  
                     tmp1 = (frxx_condi.x * df_base.w + 1) * 0.08; //df_base.w是与rough和NoV有关的值，处于[-1,0]区间；frxx_condi.x作为遮罩用于屏蔽指定像素 
@@ -434,15 +436,16 @@ Shader "Kena/KenaGI"
                     //下面跳过了使用map_Idx来获取索引的步骤 -> 这不重要 
                     //ld_indexable(buffer)(uint,uint,uint,uint) ret_from_t3_buffer_1, map_Idx_1, t3.x 
                     //ld_indexable(buffer)(uint,uint,uint,uint) ret_from_t3_buffer_2, map_Idx_2, t3.x 
-                    uint ret_from_t3_buffer_1 = 1;  //r0.w -> 用于控制循环计算不同IBL环境光贴图的次数 -> 一般恒为1 
+                    uint ret_from_t3_buffer_1 = 1;  //r0.w -> 用于控制循环计算不同IBL环境光贴图的次数 -> 一般为1 
                     uint ret_from_t3_buffer_2 = 0;  //r0.z -> 用于辅助定位IBL贴图在贴图队列中的位置 -> 可为[0,1,...] 
 
                     uint is6 = condi.x == uint(6);  //是否是 #6 渲染通道 
-
+                    half norm_shift_intensity = 0   //该参数和GI_Spec_Base是下面逻辑分支的主要计算目标 
                     if (true)  //这条分支又cb[0].x 控制，总是可以进入 
                     {
                         half RN_raw_Len = sqrt(dot(d_norm, d_norm));
-                        //以下分支用于计算某种扰动强度 -> TODO 确定学界定义范畴 
+                        norm_shift_intensity = RN_raw_Len;
+                        //以下分支用于计算某种扰动强度 -> norm_shift_intensity? -> TODO 确定学界定义范畴 
                         //计算过程中使用到了: |Rn_raw|, roughness, asin(dot(Rn,'上抬视反')/|Rn|) -> 推测为经验公式 
                         if (true) //cb1[189].x 用十六进制解码后得 0x00000001 -> true 
                         {
@@ -460,14 +463,30 @@ Shader "Kena/KenaGI"
                                 tmp1 = saturate(tmp2.x / tmp2.y);
                                 tmp1 = ((1.0 - tmp1) * (-2.0) + 3.0) * pow2(1.0 - tmp1);
 
-                                half aaa = saturate((_pi* RN_raw_Len - 0.1) * 5.0)* tmp1; //TODO 
+                                norm_shift_intensity = saturate((_pi* RN_raw_Len - 0.1) * 5.0)* tmp1; //更新 norm_shift_intensity 
                             }
-
                         }
-
+                        half cb0_1_w_rate = 0;
+                        norm_shift_intensity = lerp(norm_shift_intensity, 1.0, cb0_1_w_rate);
+                        GI_Spec_Base = (1.0 - norm_shift_intensity) * V_CB0_1.xyz;
+                    }
+                    else
+                    {
+                        GI_Spec_Base = half3(0, 0, 0); 
+                        norm_shift_intensity = 1; 
                     }
 
-
+                    half lod_lv = 6 - (1.0 - 1.2 * log(rifr.w));  //与粗糙度有关的采样LOD等级，魔法数字6来自cb0 
+                    half threshold = masked_AOwthRoughNoise;
+                    //注意: ret_from_t3_buffer_1是使用‘屏幕像素’与‘距离对数’组合出索引 -> 再从 T3 buffer 中取得的映射值 
+                    //该映射返回值的取值范围要么是 0, 要么 1 
+                    //推测是依据距离远景和是否处于屏幕中心，判断是否要开启当前像素的环境光贴图采样逻辑 
+                    //此外 masked_AOwthRoughNoise 本身是后棋盘装mask和多重AO以及Rough计算出的"高频细节" 
+                    //其作为循环判断之一也能阻止一部分像素进入IBL采样循环 
+                    UNITY_UNROLL(1) for (uint i = 0; i < ret_from_t3_buffer_1 && threshold >= 0.001; i++)
+                    {
+                        //判断当前场景‘激活’的IBL探针，如果当前像素点能被某张IBL影响，则进入内部 if 分支执行逻辑 
+                    }
 
                 }
                 else
