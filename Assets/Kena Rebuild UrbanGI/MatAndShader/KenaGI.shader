@@ -460,7 +460,7 @@ Shader "Kena/KenaGI"
                                 half rough_chan6 = max(rifr.w, 0.1);
                                 //half pi_RN_raw_Len = _pi * (RN_raw_Len * 1);
                                 half RNoVRLift = dot(d_norm, VR_lift);
-                                half RN_raw_Len = max(RN_raw_Len, 0.001);
+                                RN_raw_Len = max(RN_raw_Len, 0.001);
 
                                 half asin_input = RNoVRLift / RN_raw_Len;
                                 tmp2.x = asin(asin_input) - abs(_pi * rough_chan6 - _pi * RN_raw_Len);
@@ -527,18 +527,54 @@ Shader "Kena/KenaGI"
                     }
 
                     half spec_AOwthRoughNoise = threshold;  //这里我给threshold重新命名，以免疑惑 
+                    //下式用来构建 Lc -> 既 GI_Spec_Light_IN -> 或者按学界叫法: prefilter specular -> 原始数据采自预积分的环境光贴图IBL 
                     half3 prefilter_Specular = (ibl_spec_output + GI_Spec_Base * spec_AOwthRoughNoise) * 1.0 + spec_add;
 
                     if (matCondi.z) //对 #4 号渲染通道来说，spec需要很多额外处理 
                     {
+                        //完成第一组环境光高光 
                         half2 lut_uv_1 = half2(NoV_sat, rifr.w);//这是第一组lut_uv，rifr.w->对应粗糙度rough2 
                         half2 lut_raw_1 = SAMPLE_TEXTURE2D(_LUT, sampler_LUT, lut_uv_1);
                         half shifted_lut_bias = saturate(df_base.y * 50.0) * lut_raw_1.y * (1.0 - frxx_condi.x);
-                        half3 comb_spec = prefilter_Specular * (df_base.xyz * lut_raw_1.x + shifted_lut_bias);
+                        half gi_spec_brdf_1 = df_base.xyz * lut_raw_1.x + shifted_lut_bias; //第一组 GI_Spec 中的预积分 brdf输出值  
+                        half3 gi_spec_1 = prefilter_Specular * gi_spec_brdf_1; //这是利用预积分技术重构出的 GI_Spec 
 
+                        //完成第二组环境光高光(波瓣) 
                         half2 lut_uv_2 = half2(NoV_sat, frxx_condi.y); //这是第二组lut_uv，frxx_condi.y->对应粗糙度rough3 
                         half2 lut_raw_2 = SAMPLE_TEXTURE2D(_LUT, sampler_LUT, lut_uv_2);
-                        tmp1 = frxx_condi.x * (0.4 * lut_raw_2.x + lut_raw_2.y);
+                        //第二个 GI_Spec 中的光照方程输出值，前面的frxx_condi.x可以理解为对某些像素的遮罩，不是预积分的Lc 
+                        half gi_spec_brdf_2 = frxx_condi.x * (0.4 * lut_raw_2.x + lut_raw_2.y); 
+                        //gi_spec_2 推测是对部分存在第二高光波瓣的材质进行二次环境光高光渲染的结果 (期间需要扣除一次'曝光'过程中的额外部分) 
+                        half3 gi_spec_2 = gi_spec_1 * (1 - gi_spec_brdf_2) + spec_add_raw.xyz * gi_spec_brdf_2; 
+
+                        //spec_mask -> 来自高光贴图alpha通道被1减的结果 (代表了强度) 
+                        //gi_spec_brdf_2 -> 本身是基于视角和法线计算出的光照强度分布(也是强度) 
+                        //AOwthRoughNoise -> 则是光照强度遮罩 
+                        half spec_intensity = spec_mask * gi_spec_brdf_2 * AOwthRoughNoise; 
+                        half RN_shift_intensity = 0; 
+                        if (true)  //这条分支又cb[0].x 控制，总是可以进入 
+                        {
+                            half RN_raw_Len = sqrt(dot(d_norm, d_norm));
+                            RN_shift_intensity = RN_raw_Len;
+                            if (true) //cb1[189].x 用十六进制解码后得 0x00000001 -> true 
+                            {
+                                //从frxx(T11)纹理中y通道提取rough数值,对没有数值的部分(木制件,茅草屋顶等部分)确保数值不低于0.1 
+                                half rough_chan4 = max(frxx_condi.y, 0.1); //从上下文环境看，这条rough为 #4号渲染通道专用 
+                                RN_raw_Len = max(RN_raw_Len, 0.001);  
+
+                                half asin_input = dot(d_norm, VR) / RN_raw_Len; 
+
+                                tmp2.x = asin(asin_input) - abs(_pi * rough_chan4 - _pi * RN_raw_Len);
+                                tmp2.y = (_pi * rough_chan4 + _pi * RN_raw_Len) - abs(_pi * rough_chan4 - _pi * RN_raw_Len);
+                                tmp1 = saturate(tmp2.x / tmp2.y);
+                                tmp1 = ((1.0 - tmp1) * (-2.0) + 3.0) * pow2(1.0 - tmp1);
+
+                                RN_shift_intensity = saturate((_pi * RN_raw_Len - 0.1) * 5.0) * tmp1; //更新 RN_shift_intensity
+                            }
+                            //TODO 
+                        }
+
+
                     }
                     else  //不是 #4，也不是 #0 和 #7 的所有其他渲染通道 
                     {
