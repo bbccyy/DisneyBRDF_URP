@@ -405,7 +405,8 @@ Shader "Kena/KenaGI"
                 if ((is0or7.x & is0or7.y) != 0)  //既不是 #0号 也不是 #7 号渲染通道 
                 {
                     //GI_Spec 计算部分在此 
-                    half3 GI_Spec_Base = half3(0, 0, 0);
+                    half3 Specular_Final = half3(0, 0, 0);
+                    half3 gi_spec_base = half3(0, 0, 0);
 
                     //首先依据是否是9or5号渲染通道，选择R11(环境光底色*方块Mask.y) 或 环境光底色作为新的 df_base(基础环境光底色) 
                     df_base.xyz = is9or5 ? R11.xyz : df_base.xyz;  
@@ -445,7 +446,7 @@ Shader "Kena/KenaGI"
                     uint ret_from_t3_buffer_2 = 1;  //r0.z -> 用于辅助定位IBL贴图在贴图队列中的位置 -> 可为[0,1,..7] 
 
                     uint is6 = condi.x == uint(6);  //是否是 #6 渲染通道 
-                    half norm_shift_intensity = 0   //该参数和GI_Spec_Base是下面逻辑分支的主要计算目标 
+                    half norm_shift_intensity = 0   //该参数和gi_spec_base是下面逻辑分支的主要计算目标 
                     if (true)  //这条分支又cb[0].x 控制，总是可以进入 
                     {
                         half RN_raw_Len = sqrt(dot(d_norm, d_norm));
@@ -473,11 +474,11 @@ Shader "Kena/KenaGI"
                         }
                         half cb0_1_w_rate = 0;
                         norm_shift_intensity = lerp(norm_shift_intensity, 1.0, cb0_1_w_rate);
-                        GI_Spec_Base = (1.0 - norm_shift_intensity) * V_CB0_1.xyz;
+                        gi_spec_base = (1.0 - norm_shift_intensity) * V_CB0_1.xyz;
                     }
                     else
                     {
-                        GI_Spec_Base = half3(0, 0, 0); 
+                        gi_spec_base = half3(0, 0, 0);
                         norm_shift_intensity = 1; 
                     }
 
@@ -523,12 +524,12 @@ Shader "Kena/KenaGI"
                     {
                         half sky_lod = 1.8154297 - (1.0 - 1.2 * log(rifr.w)) - 1;
                         half3 sky_raw = SAMPLE_TEXTURECUBE_LOD(_Sky, sampler_Sky, VR_lift, sky_lod).rgb;
-                        GI_Spec_Base = sky_raw * V_CB1_180 * norm_shift_intensity + GI_Spec_Base;
+                        gi_spec_base = sky_raw * V_CB1_180 * norm_shift_intensity + gi_spec_base;
                     }
 
                     half spec_AOwthRoughNoise = threshold;  //这里我给threshold重新命名，以免疑惑 
                     //下式用来构建 Lc -> 既 GI_Spec_Light_IN -> 或者按学界叫法: prefilter specular -> 原始数据采自预积分的环境光贴图IBL 
-                    half3 prefilter_Specular = (ibl_spec_output + GI_Spec_Base * spec_AOwthRoughNoise) * 1.0 + spec_add;
+                    half3 prefilter_Specular = (ibl_spec_output + gi_spec_base * spec_AOwthRoughNoise) * 1.0 + spec_add;
 
                     if (matCondi.z) //对 #4 号渲染通道来说，spec需要很多额外处理 
                     {
@@ -552,8 +553,8 @@ Shader "Kena/KenaGI"
                         //AOwthRoughNoise -> 则是光照强度遮罩 
                         half spec_second_intensity = spec_mask * gi_spec_brdf_2 * AOwthRoughNoise;  //该参数后面会影响第二高光的强度 
                         half RN_shift_intensity = 0;                //带求的扰动强度 
-                        half3 spec_second_base = half3(0, 0, 0);    //带求的第二波瓣颜色 
-                        //下面的分支用于输出属于 #4 号通道专有的 spec_second_base(既第二波瓣颜色) 
+                        half3 gi_spec_second_base = half3(0, 0, 0);    //带求的第二波瓣颜色 
+                        //下面的分支用于输出属于 #4 号通道专有的 gi_spec_second_base(既第二波瓣颜色) 
                         //以及 RN_shift_intensity(基于RN的扰动强度) 
                         if (true)  //这条分支又cb[0].x 控制，总是可以进入 
                         {
@@ -577,11 +578,11 @@ Shader "Kena/KenaGI"
                             
                             half rn_shift_rate = 0; //定义在 cb0_1_w 的调节比率，恒为0
                             RN_shift_intensity = lerp(RN_shift_intensity, 1.0, rn_shift_rate); 
-                            spec_second_base = V_CB0_1.xyz * (1.0 - RN_shift_intensity); //第二高光波瓣的三通道颜色强度 
+                            gi_spec_second_base = V_CB0_1.xyz * (1.0 - RN_shift_intensity); //第二高光波瓣的三通道颜色强度 
                         }
                         else
                         {
-                            spec_second_base = half3(0, 0, 0); 
+                            gi_spec_second_base = half3(0, 0, 0);
                             RN_shift_intensity = 1.0; 
                         }
 
@@ -619,14 +620,28 @@ Shader "Kena/KenaGI"
                                 threshold_2 = threshold_2 * (1.0 - rate_factor * ibl_raw_2.a); 
                             }
                         }
-                        //TODO Sky_Box 
 
-
-
+                        //第二次采样天空盒  
+                        if (true)  //总是进入 
+                        {
+                            half sky_lod_2 = 1.8154297 - (1.0 - 1.2 * log(frxx_condi.y)) - 1;
+                            half3 sky_raw_2 = SAMPLE_TEXTURECUBE_LOD(_Sky, sampler_Sky, VR, sky_lod_2).rgb;
+                            gi_spec_second_base = sky_raw_2 * V_CB1_180 * RN_shift_intensity + gi_spec_second_base; //为gi_spec追加天空盒的贡献 
+                        }
+                        
+                        half spec_second_intensity_final = threshold_2; //重新命名下，以免糊涂 
+                        half3 ibl_scale_3chan = half3(1, 1, 1);  //用于替代 cb1_156_xyz 中的数据 -> 缩放 ibl_spec2 
+                        half3 scale_second_spec = half3(1, 1, 1);          //用于替代 cb1_134_yyy 中的数据 -> 缩放 第二高光的总和 
+                        
+                        //ibl_spec2_output * ibl_scale_3chan -> 主要来自‘IBL贴图颜色’与‘第二高光强度’的混合 -> 代表了 GI_Spec_second_Mirror 
+                        //gi_spec_second_base * spec_second_intensity_final -> 主要来自‘阳光颜色’与‘第二高光强度’的混合 -> 代表了 GI_Spec_second_Diffuse 
+                        //gi_spec_2 -> 是经过调整的第一高光颜色 
+                        Specular_Final = (ibl_spec2_output * ibl_scale_3chan + gi_spec_second_base * spec_second_intensity_final)* scale_second_spec + gi_spec_2; 
                     }
                     else  //不是 #4，也不是 #0 和 #7 的所有其他渲染通道 
                     {
-
+                        
+                        //Specular_Final = ...
                     }
 
                 }
