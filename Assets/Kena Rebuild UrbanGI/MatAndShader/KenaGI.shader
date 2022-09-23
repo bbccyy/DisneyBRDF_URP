@@ -497,7 +497,7 @@ Shader "Kena/KenaGI"
                         //ld_indexable(buffer)(short,short,short,short) out, tb4_idx, t4.x  -> 使用tb4_idx=[0-8]采样返回都是"6" 
                         //这里使用视检过的"正确值" -> out = 12 来替代 
                         half3 v_PixelToProbe = posWS - cb4_12.xyz; 
-                        half d_PixelToProbe_square = dot(d_PixelToProbe, d_PixelToProbe); 
+                        half d_PixelToProbe_square = dot(v_PixelToProbe, v_PixelToProbe); 
                         half d_PixelToProbe = sqrt(d_PixelToProbe_square); 
                         if (d_PixelToProbe < cb4_12.w)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
                         {
@@ -550,8 +550,11 @@ Shader "Kena/KenaGI"
                         //spec_mask -> 来自高光贴图alpha通道被1减的结果 (代表了强度) 
                         //gi_spec_brdf_2 -> 本身是基于视角和法线计算出的光照强度分布(也是强度) 
                         //AOwthRoughNoise -> 则是光照强度遮罩 
-                        half spec_intensity = spec_mask * gi_spec_brdf_2 * AOwthRoughNoise; 
-                        half RN_shift_intensity = 0; 
+                        half spec_second_intensity = spec_mask * gi_spec_brdf_2 * AOwthRoughNoise;  //该参数后面会影响第二高光的强度 
+                        half RN_shift_intensity = 0;                //带求的扰动强度 
+                        half3 spec_second_base = half3(0, 0, 0);    //带求的第二波瓣颜色 
+                        //下面的分支用于输出属于 #4 号通道专有的 spec_second_base(既第二波瓣颜色) 
+                        //以及 RN_shift_intensity(基于RN的扰动强度) 
                         if (true)  //这条分支又cb[0].x 控制，总是可以进入 
                         {
                             half RN_raw_Len = sqrt(dot(d_norm, d_norm));
@@ -571,8 +574,71 @@ Shader "Kena/KenaGI"
 
                                 RN_shift_intensity = saturate((_pi * RN_raw_Len - 0.1) * 5.0) * tmp1; //更新 RN_shift_intensity
                             }
-                            //TODO 
+                            
+                            half rn_shift_rate = 0; //定义在 cb0_1_w 的调节比率，恒为0
+                            RN_shift_intensity = lerp(RN_shift_intensity, 1.0, rn_shift_rate); 
+                            spec_second_base = V_CB0_1.xyz * (1.0 - RN_shift_intensity); //第二高光波瓣的三通道颜色强度 
                         }
+                        else
+                        {
+                            spec_second_base = half3(0, 0, 0); 
+                            RN_shift_intensity = 1.0; 
+                        }
+
+
+
+
+
+
+
+
+
+                        half lod_lv_spc2 = 6 - (1.0 - 1.2 * log(frxx_condi.y));  //与第二波瓣粗糙度(frxx.y)有关的采样LOD等级，魔法数字6来自cb0 
+                        half threshold_2 = spec_second_intensity; //第二高光波瓣的强度 
+                        half3 ibl_spec2_output = half3(0, 0, 0);  //以下for循环的主要输出 
+
+                        UNITY_UNROLL(1) for (uint i = 0; i < ret_from_t3_buffer_1 && threshold_2 >= 0.001; i++) 
+                        {
+                            //判断当前场景‘激活’的IBL探针，如果当前像素点能被某张IBL影响，则进入内部 if 分支执行逻辑 
+                            uint tb4_idx = i + ret_from_t3_buffer_2;
+                            //下面跳过了使用 tb4_idx 来获取索引的步骤 -> t4和t3一样，也是张映射表 
+                            //ld_indexable(buffer)(short,short,short,short) out, tb4_idx, t4.x  -> 使用tb4_idx=[0-8]采样返回都是"6" 
+                            //这里使用视检过的"正确值" -> out = 12 来替代 
+                            half3 v_PixelToProbe = posWS - cb4_12.xyz;  //r7.xyz
+                            half d_PixelToProbe_square = dot(v_PixelToProbe, v_PixelToProbe); //像素到探针距离的平方 
+                            half d_PixelToProbe = sqrt(d_PixelToProbe_square);      //像素到探针的距离 
+                            if (d_PixelToProbe < cb4_12.w)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
+                            {
+                                half d_rate = saturate(d_PixelToProbe / cb4_12.w); //距离占比  
+                                half VRoP2P = dot(VR, v_PixelToProbe);  //注:第一次求spec时使用的是 VR_Lift 
+                                //下式形式为: Scale * VR + v_PixelToProbe - [200,0,0] 
+                                half3 shifted_p2p_dir_2 = (sqrt(pow2(VRoP2P) - (d_PixelToProbe_square - pow2(cb4_12.w))) - VRoP2P) * VR + v_PixelToProbe - half3(200, 0, 0);
+                                
+                                tmp1 = max(2.5 * d_rate - 1.5, 0);  //如果 (像素到探针的距离 / 探针影响半径R) < 0.6 -> 上式一律返回 0 
+                                half rate_factor = 1.0 - (3.0 - 2.0 * tmp1) * pow2(tmp1); //距离缩放因子 
+                                //shifted_p2p_dir_2 是采样cubemap的方向指针 
+                                //IBL_cubemap_array的index由 cb4[12 + 341].y 获得，当前值为 "13" 
+                                //注意，由于没有以Cubemap_array形式导入原始资源，故如下采样的uv参数中没有第四维(array索引) 
+                                half4 ibl_raw_2 = SAMPLE_TEXTURECUBE_LOD(_IBL, sampler_IBL, shifted_p2p_dir_2, lod_lv_spc2).rgba; 
+                                //更新 ibl_spec2_output -> cb4_353.x=1 
+                                ibl_spec2_output = (cb4_353.x * ibl_raw_2.rgb) * rate_factor * threshold_2 * RN_shift_intensity + ibl_spec2_output; 
+                                //更新 threshold_2 -> spec_second_intensity 
+                                threshold_2 = threshold_2 * (1.0 - rate_factor * ibl_raw_2.a); 
+                            }
+                        }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
                     }
