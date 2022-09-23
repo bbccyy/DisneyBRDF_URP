@@ -640,25 +640,24 @@ Shader "Kena/KenaGI"
                     }
                     else  //不是 #4，也不是 #0 和 #7 的所有其他渲染通道 
                     {
-                        
-                        //Specular_Final = ...
+                        half2 lut_uv_1 = half2(NoV_sat, rifr.w);  //这是第一组lut_uv，rifr.w->对应粗糙度rough2 
+                        half2 lut_raw_1 = SAMPLE_TEXTURE2D(_LUT, sampler_LUT, lut_uv_1); 
+                        half shifted_lut_bias = saturate(df_base.y * 50.0) * lut_raw_1.y; 
+                        half gi_spec_brdf_1 = df_base.xyz * lut_raw_1.x + shifted_lut_bias;  //第一组 GI_Spec 中的预积分 brdf输出值  
+                        half3 gi_spec_1 = prefilter_Specular * gi_spec_brdf_1; 
+                        Specular_Final = gi_spec_1;
                     }
 
+                    Specular_Final = min(Specular_Final, half3(0, 0, 0));
+                    output.xyz = Specular_Final;
                 }
                 else
                 {
                     //o0.xyz = R10颜色 
+                    //对于没有高光的部分 -> 直接返回R10颜色 -> R10颜色可以认为是 GI_Diffuse_Final 
+                    output.xyz = R10.xyz; 
                 }
-
-
-
-
-
-
-
-
-
-
+                //TODO test
                 return half4((test).xxx, 1 );
             }
             ENDHLSL
