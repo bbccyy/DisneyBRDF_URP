@@ -585,17 +585,10 @@ Shader "Kena/KenaGI"
                             RN_shift_intensity = 1.0; 
                         }
 
-
-
-
-
-
-
-
-
+                        //以下通过使用view_reflection第二次采样IBL -> 计算 第二高光波瓣的强度 以及 第二高光颜色 
                         half lod_lv_spc2 = 6 - (1.0 - 1.2 * log(frxx_condi.y));  //与第二波瓣粗糙度(frxx.y)有关的采样LOD等级，魔法数字6来自cb0 
                         half threshold_2 = spec_second_intensity; //第二高光波瓣的强度 
-                        half3 ibl_spec2_output = half3(0, 0, 0);  //以下for循环的主要输出 
+                        half3 ibl_spec2_output = half3(0, 0, 0);  //第二高光颜色 
 
                         UNITY_UNROLL(1) for (uint i = 0; i < ret_from_t3_buffer_1 && threshold_2 >= 0.001; i++) 
                         {
@@ -626,18 +619,7 @@ Shader "Kena/KenaGI"
                                 threshold_2 = threshold_2 * (1.0 - rate_factor * ibl_raw_2.a); 
                             }
                         }
-
-
-
-
-
-
-
-
-
-
-
-
+                        //TODO Sky_Box 
 
 
 
