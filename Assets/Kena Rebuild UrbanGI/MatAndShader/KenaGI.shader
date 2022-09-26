@@ -80,11 +80,11 @@ Shader "Kena/KenaGI"
             static float asin(float a) {
                 float a2 = a * a;   // a squared
                 float a3 = a * a2;  // a cubed
-                if (a >= 0f) {
+                if (a >= 0) {
                     return 1.5707963267948966
-                        - (float)Math.sqrt(1.0 - a) * (1.5707288 - 0.2121144 * a + 0.0742610 * a2 - 0.0187293 * a3);
+                        - (float)sqrt(1.0 - a) * (1.5707288 - 0.2121144 * a + 0.0742610 * a2 - 0.0187293 * a3);
                 }
-                return -1.5707963267948966 + (float)Math.sqrt(1.0 + a) * (1.5707288 + 0.2121144 * a + 0.0742610 * a2 + 0.0187293 * a3);
+                return -1.5707963267948966 + (float)sqrt(1.0 + a) * (1.5707288 + 0.2121144 * a + 0.0742610 * a2 + 0.0187293 * a3);
             }
 
             static float4 screen_param = float4(1708, 960, 1.0/1708, 1.0/960);  //这是截帧时的屏幕像素信息 
@@ -446,7 +446,7 @@ Shader "Kena/KenaGI"
                     uint ret_from_t3_buffer_2 = 1;  //r0.z -> 用于辅助定位IBL贴图在贴图队列中的位置 -> 可为[0,1,..7] 
 
                     uint is6 = condi.x == uint(6);  //是否是 #6 渲染通道 
-                    half norm_shift_intensity = 0   //该参数和gi_spec_base是下面逻辑分支的主要计算目标 
+                    half norm_shift_intensity = 0;  //该参数和gi_spec_base是下面逻辑分支的主要计算目标 
                     if (true)  //这条分支又cb[0].x 控制，总是可以进入 
                     {
                         half RN_raw_Len = sqrt(dot(d_norm, d_norm));
@@ -478,7 +478,7 @@ Shader "Kena/KenaGI"
                     }
                     else
                     {
-                        gi_spec_base = half3(0, 0, 0);
+                        gi_spec_base = half3(0, 0, 0); 
                         norm_shift_intensity = 1; 
                     }
 
@@ -490,7 +490,7 @@ Shader "Kena/KenaGI"
                     //推测是依据距离远景和是否处于屏幕中心，判断是否要开启当前像素的环境光贴图采样逻辑 
                     //此外 masked_AOwthRoughNoise 本身是后棋盘装mask和多重AO以及Rough计算出的"高频细节" 
                     //其作为循环判断之一也能阻止一部分像素进入IBL采样循环 
-                    UNITY_UNROLL(1) for (uint i = 0; i < ret_from_t3_buffer_1 && threshold >= 0.001; i++) 
+                    [unroll] for (uint i = 0; i < ret_from_t3_buffer_1 && threshold >= 0.001; i++)
                     {
                         //判断当前场景‘激活’的IBL探针，如果当前像素点能被某张IBL影响，则进入内部 if 分支执行逻辑 
                         uint tb4_idx = i + ret_from_t3_buffer_2;
@@ -591,7 +591,7 @@ Shader "Kena/KenaGI"
                         half threshold_2 = spec_second_intensity; //第二高光波瓣的强度 
                         half3 ibl_spec2_output = half3(0, 0, 0);  //第二高光颜色 
 
-                        UNITY_UNROLL(1) for (uint i = 0; i < ret_from_t3_buffer_1 && threshold_2 >= 0.001; i++) 
+                        [unroll] for (uint i = 0; i < ret_from_t3_buffer_1 && threshold_2 >= 0.001; i++)
                         {
                             //判断当前场景‘激活’的IBL探针，如果当前像素点能被某张IBL影响，则进入内部 if 分支执行逻辑 
                             uint tb4_idx = i + ret_from_t3_buffer_2;
@@ -658,7 +658,7 @@ Shader "Kena/KenaGI"
                     output.xyz = R10.xyz; 
                 }
                 //TODO test
-                return half4((test).xxx, 1 );
+                return half4((output).xyz * 1, 1);
             }
             ENDHLSL
         }
