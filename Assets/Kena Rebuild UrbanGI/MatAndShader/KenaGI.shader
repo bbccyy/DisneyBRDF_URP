@@ -211,7 +211,7 @@ Shader "Kena/KenaGI"
                 uint flag_r7z = 0;  // 0 < cb1[155].x ?  -> 注: 修改如下几个控制flag，会极大影响diffuse表现 
                 uint flag_r7w = 1;  // 0 < cb1[200].z ? 
                 uint and_r7z_w = flag_r7z & flag_r7w; 
-                uint flag_ne_r7w = 1; // 0 != cb1[155].x ? 
+                uint flag_ne_r7w = 0; // 0 != cb1[155].x ? 
                 half3 R8 = flag_ne_r7w ? half3(1, 1, 1) : df.xyz; 
                 //R11 -> 经过 或 没有经过 棋盘处理的 df_base 
                 half4 R11 = and_r7z_w ? half4(df_base.xyz, rifr.y) * chessMask.y : half4(df_base.xyz, rifr.y); 
@@ -220,29 +220,39 @@ Shader "Kena/KenaGI"
                 R10.w = R11.w; 
                 R10 = is9or5 ? R10 : half4(df.xyz, rifr.y);  //部分人物+窗户等物件显示diffse,其他近似黑白噪点 
 
-
                 //计算优化后的 NoV 输出到 df_base.w 中 -> 不是Lambert(NoL)，也不是Phong(NoH)，应该和Fresnel或漫反射强度相关 
                 half NoV = dot(norm, -viewDir);
                 half NoV_sat = saturate(NoV);
                 half a = (NoV_sat * 0.5 + 0.5) * NoV_sat - 1.0; //大体上在[-1, 0]区间上成二次弧线分布，N和V垂直得-1 
                 half b = saturate(1.25 - 1.25 * rifr.w); //与纹理.rough2成反比，且整体调整了偏移和缩放 
                 df_base.w = a * b; //这张输出图对比 NoV 来说，区间在[-1, 0]，且物体边缘数值绝对值大，中间值接近0 
-                half NoV_nearOne = df_base.w + 1.0; //上面的数值转换到 [0, 1] 区间，整体类似提亮的NoV，垂直得0(边缘暗)，同向得1(中间亮) 
-                
-                //计算R12颜色 
-                half3 R12 = R10.xyz * 1.111111;
+                //上面的数值转换到 [0, 1] 区间，经过粗糙度处理，整体类似提亮后的NoV 
+                half NoV_nearOne = df_base.w + 1.0;  //该值具有边缘暗中间亮的效果 -> 与下式中(1 - frxx_condi.x * fresnel)算子作用相似 
+
+                //计算R12颜色 -> 按照视角的大小，表现出由暗到明的过渡(边缘暗中间亮) 
+                //另外，(col^2 - col)*t + col -> 这种模式的颜色操作等效于对原始颜色进行 "非线性提亮" 
+                half3 R12 = R10.xyz * 1.111111; 
                 half3 tmp_col = 0.85 * (NoV_sat - 1) * (1 - (R12 - 0.78*(R12 * R12 - R12))) + 1; 
-                R12 = R12 * tmp_col;    //将基于NoV的环境光强度 -> 作用到 R10 颜色上 
+                R12 = R12 * tmp_col;    //将基于NoV的环境光强度 -> 作用到 R10 颜色上(边缘压暗，中间相对提亮) 
 
                 //施加Fresnel影响 
-                float p5 = pow5(1 - NoV_sat);
-                float fresnel = 0.04 * (1 - p5) + p5;                 //TODO:这个F项计算方式可摘录 
+                float p5 = pow5(1 - NoV_sat); 
+                float fresnel = lerp(p5, 1, 0.04);                    //略微修正(增大)fresnel 
+                //Fresnel项的特色众所周知(边缘亮中间暗)；frxx_condi.x则是来自纹理的遮罩，只在人物+草叶等物件上有数值 
+                //frxx_condi.x * fresnel -> 对菲涅尔项添加遮罩，现在只有人物+草叶有Fresnel效果(数值大于0)
+                //(1 - frxx_condi.x * fresnel) -> 取反后被遮罩屏蔽的区域数值为 1；人物和草叶等变为反色(边缘暗中间亮) 
+                //R10颜色推测为GI_Diffuse_Col -> 乘以上述算子 -> 降低人物和草叶的边缘的亮度 
                 tmp_col = R10.xyz * (1 - frxx_condi.x * fresnel);     //这里是将 Fresnel 项 -> 作用到 R10 颜色上 
-                R12 = 0.9 * NoV_nearOne * R12;                        //这是经过环境光强度修正的 R10 
+                //NoV_nearOne算子与(1 - frxx_condi.x * fresnel)功能相似 
+                //R12颜色可以认为是基于R10(环境光基础色)进行边缘压暗(中间相对提亮)操作后的结果，与上式tmp_col比更加暗沉
+                //注意R12 = R10 * (一次NoV压暗) * (第二次NoV压暗) 
+                R12 = 0.9 * NoV_nearOne * R12; 
                 R12 = lerp(tmp_col, R12, frxx_condi.x * factor_RoughOrZero);  //lerp中的Rate在绝大部分情况下趋于 0 
 
+                test.xyz = (frxx_condi.x * factor_RoughOrZero).xxx;
+
                 //采样AO
-                half ao = SAMPLE_TEXTURE2D(_AO, sampler_AO, suv);
+                half ao = SAMPLE_TEXTURE2D(_AO, sampler_AO, suv); 
 
                 //求半分辨率下的UV 
                 half2 _suv = min(suv, cb0_6.xy);                        //正常分辨率下的 UV 
