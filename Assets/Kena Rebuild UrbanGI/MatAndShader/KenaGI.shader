@@ -205,13 +205,22 @@ Shader "Kena/KenaGI"
                 //可见粗糙度越高 -> 越接近采样获得的diffuse；粗糙度越低/或者是#9号通道 -> 颜色退化成某种自定义的强度值 
                 half4 df_base = half4( lerp(base_intensity.xxx, df.xyz, factor_RoughOrZero).xyz, 0 ); 
                 //test = df_base;  //可以看出 rifr.y 似乎是不同材质漫反射强度基础值，经过和diffuse贴图lerp后，腰带和茅屋顶部分拥有3个通道不同的强度分布，其余部分依旧类似 rifr.y 的分布 
-
-                //计算集中中间态颜色: R8, R10 和 R11 
-                uint is9or5 = matCondi.x | matCondi.y;
-                half3 R8 = half3(1, 1, 1);  //TODO 
-                half4 R11 = half4(df_base.xyz, rifr.y) * chessMask.y;       //经过棋盘处理的 df_base 
-                half4 R10 = is9or5 ? half4(chessMask.xxx, R11.w) : half4(df.xyz, rifr.y);  //部分人物+窗户等物件显示diffse,其他近似黑白噪点 
                 
+                //计算R10颜色 -> diffuse_base_col 
+                uint is9or5 = matCondi.x | matCondi.y; 
+                uint flag_r7z = 0;  // 0 < cb1[155].x ?  -> 注: 修改如下几个控制flag，会极大影响diffuse表现 
+                uint flag_r7w = 1;  // 0 < cb1[200].z ? 
+                uint and_r7z_w = flag_r7z & flag_r7w; 
+                uint flag_ne_r7w = 1; // 0 != cb1[155].x ? 
+                half3 R8 = flag_ne_r7w ? half3(1, 1, 1) : df.xyz; 
+                //R11 -> 经过 或 没有经过 棋盘处理的 df_base 
+                half4 R11 = and_r7z_w ? half4(df_base.xyz, rifr.y) * chessMask.y : half4(df_base.xyz, rifr.y); 
+                half4 R10 = half4(0, 0, 0, 0); 
+                R10.xyz = and_r7z_w ? chessMask.xxx : R8.xyz; 
+                R10.w = R11.w; 
+                R10 = is9or5 ? R10 : half4(df.xyz, rifr.y);  //部分人物+窗户等物件显示diffse,其他近似黑白噪点 
+
+
                 //计算优化后的 NoV 输出到 df_base.w 中 -> 不是Lambert(NoL)，也不是Phong(NoH)，应该和Fresnel或漫反射强度相关 
                 half NoV = dot(norm, -viewDir);
                 half NoV_sat = saturate(NoV);
