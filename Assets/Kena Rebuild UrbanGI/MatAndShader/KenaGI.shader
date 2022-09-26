@@ -138,6 +138,8 @@ Shader "Kena/KenaGI"
 
             half4 frag (v2f IN) : SV_Target
             {
+                half4 test = half4(0, 0, 0, 0);  //JUST FOR SHOW-RESULTS 
+
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(IN);
                 
                 half4 output = half4(0, 0, 0, 0);
@@ -153,19 +155,26 @@ Shader "Kena/KenaGI"
                 
                 //get h-clip space 
                 coord = coord * d; 
-                half4 hclip = half4(coord.xy, d, 1);
+                float4 hclip = float4(coord.xy, d, 1); 
 
                 //use matrix_Inv_VP to rebuild posWS 
-                half4 posWS = mul(M_Inv_VP, hclip);  //注意此时单位还是 "厘米" 
+                float4 posWS = mul(M_Inv_VP, hclip);  //注意此时单位还是 "厘米" 
 
                 //ViewDir (使用时取反: 从视点触发指向摄像机) 
                 half3 viewDir = normalize(posWS.xyz - camPosWS); 
+                /*
+                //开启这段代码用于交叉验证 posWS的准确性 -> 如果posWS不是像素点的世界坐标
+                //那么摄像机世界坐标到posWS所描述的点的距离不会出现由进到远的分层效果 
+                test.xyz = posWS.xyz - camPosWS;
+                test.x = sqrt(dot(test.xyz, test.xyz)) / 1000;
+                test.yz = 0;
+                */
 
                 //Sample Normal 
                 half3 n = SAMPLE_TEXTURE2D(_Norm, sampler_Norm, suv); 
                 n = n * 2 - 1; 
                 half3 norm = normalize(n); 
-
+                
                 //get chessboard mask 
                 uint2 jointPixelIdx = (uint2)(IN.vertex.xy); 
                 uint chessboard = (jointPixelIdx.x + jointPixelIdx.y + 1) & 0x00000001; 
@@ -175,11 +184,13 @@ Shader "Kena/KenaGI"
                 float4 rifr = SAMPLE_TEXTURE2D(_R_I_F_R, sampler_R_I_F_R, suv); 
                 uint flag = (uint)round(rifr.z * 255);
                 uint2 condi = flag & uint2(15, 16);//condi.x控制像素渲染逻辑(颜色表现丰富则噪点密集，表现单一则成块同色), y控制颜色混合;  
+                /* 对condi的计算等效如下代码: 
+                uint2 condi = uint2(flag & 0x0000000F, flag & 0x00000010); */ 
 
                 //Sample _F_R_X_X
                 float4 frxx = SAMPLE_TEXTURE2D(_F_R_X_X, sampler_F_R_X_X, suv);
-                //下面frxx_condi的数据覆盖:衣服布料色(除缝线和划痕),树叶(绿色不连续，有随机间断),头部轮廓(彩)   
-                float4 frxx_condi = condi.y == 16 ? float4(0, 0, 0, 0) : frxx.xyzw; //其x通道负责后续Fresnel项功能 
+                //下面frxx_condi的数据覆盖:衣服布料色(除缝线和划痕),树叶(绿色不连续，有随机间断),头部轮廓(彩) 
+                float4 frxx_condi = condi.y ? float4(0, 0, 0, 0) : frxx.xyzw; //其x通道负责后续Fresnel项功能 
 
                 //计算渲染通道mask, matCondi.xyz 分别对应 9, 5 和 4号渲染通道 -> 提供了随机的微小噪点 
                 uint3 matCondi = condi.xxx == uint3(9, 5, 4).xyz; 
@@ -189,18 +200,18 @@ Shader "Kena/KenaGI"
 
                 //Diffuse_GI_base 
                 half base_intensity = rifr.y * 0.08;
-                half4 df_delta = df.xyzw - base_intensity; //从漫反射图中减去部分光强度 -> 余下部分高亮度材质(皮肤+窗户等) 
-                half factor_RoughOrZero = matCondi.x ? 0 : rifr.x; //rifr.x=rough,只有屋顶+人物有值 
-                
-                //从采样df中先扣除强度,获得"dif_delta",再对其缩放(主要基于材质自身的rough)，最后再加回扣除的光强 
-                half4 df_base = df_delta * factor_RoughOrZero + base_intensity; 
+                half factor_RoughOrZero = matCondi.x ? 0 : rifr.x;  //#9号通道时粗糙度为0， 其余情况使用贴图输出的rifr.x值(粗糙度:rough1) 
+                //按照factor_RoughOrZero所代表的比例 -> 对漫反射颜色做lerp -> 从‘base_intensity’到‘贴图输出的固有色’进行调和 
+                //可见粗糙度越高 -> 越接近采样获得的diffuse；粗糙度越低/或者是#9号通道 -> 颜色退化成某种自定义的强度值 
+                half4 df_base = half4( lerp(base_intensity.xxx, df.xyz, factor_RoughOrZero).xyz, 0 ); 
+                //test = df_base;  //可以看出 rifr.y 似乎是不同材质漫反射强度基础值，经过和diffuse贴图lerp后，腰带和茅屋顶部分拥有3个通道不同的强度分布，其余部分依旧类似 rifr.y 的分布 
 
                 //计算集中中间态颜色: R8, R10 和 R11 
                 uint is9or5 = matCondi.x | matCondi.y;
                 half3 R8 = half3(1, 1, 1);  //TODO 
                 half4 R11 = half4(df_base.xyz, rifr.y) * chessMask.y;       //经过棋盘处理的 df_base 
                 half4 R10 = is9or5 ? half4(chessMask.xxx, R11.w) : half4(df.xyz, rifr.y);  //部分人物+窗户等物件显示diffse,其他近似黑白噪点 
-
+                
                 //计算优化后的 NoV 输出到 df_base.w 中 -> 不是Lambert(NoL)，也不是Phong(NoH)，应该和Fresnel或漫反射强度相关 
                 half NoV = dot(norm, -viewDir);
                 half NoV_sat = saturate(NoV);
@@ -260,7 +271,6 @@ Shader "Kena/KenaGI"
                 half scale = saturate((20000 - d) * 0.00016666666);      //Scale, 靠近摄像机->1，远离->0 
                 d_norm = scale * (d_norm * g_depth - norm) + norm;       //这张基于4邻域深度差扰动后的d_norm看起来与_GNorm很像(可能略微模糊了一点?) 
 
-                half4 test = half4(0, 0, 0, 0);  //JUST FOR SHOW-RESULTS 
                 if (condi.x)  //对于 #1 ~ #15 号渲染通道来说都能进入 
                 {
                     //R12和R10颜色都是黑白噪点下显示人物本体Diffuse的贴图，区别在于R12对D图施加了NoV和Fresnel，而R10是直白的D图 
@@ -393,7 +403,6 @@ Shader "Kena/KenaGI"
                     //在前面的基础上还要求是 #9或#5号渲染通道 -> check 才为 true(1) 
                     output.w = half((uint(check) & uint(intense)) & is9or5);    //此处返回恒为 0 
 
-                    test.x = AO_final;
                 }
                 else //对于 #0 号 渲染通道  
                 {
@@ -648,8 +657,8 @@ Shader "Kena/KenaGI"
                         Specular_Final = gi_spec_1;
                     }
 
-                    Specular_Final = min(Specular_Final, half3(0, 0, 0));
-                    output.xyz = Specular_Final;
+                    Specular_Final = min(-Specular_Final, half3(0, 0, 0)); 
+                    output.xyz = -Specular_Final + R10.xyz;
                 }
                 else
                 {
@@ -658,7 +667,7 @@ Shader "Kena/KenaGI"
                     output.xyz = R10.xyz; 
                 }
                 //TODO test
-                return half4((output).xyz * 1, 1);
+                return half4((test).xyz * 1, 1);
             }
             ENDHLSL
         }
