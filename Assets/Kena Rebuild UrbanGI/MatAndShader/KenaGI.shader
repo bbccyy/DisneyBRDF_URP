@@ -288,10 +288,12 @@ Shader "Kena/KenaGI"
                     delta_half_pixels.x * delta_half_pixels.y); 
                 //组合4次采样的深度 
                 half4 depth4 = half4(g_norm_ld.w, g_norm_rd.w, g_norm_lu.w, g_norm_ru.w); //注,这里的w通道存放单位为里面的距离 
-                depth4 = 1.0 / (abs(depth4 - d) + 0.0001) * scr_pat;   //r13.xyzw 
-                test = depth4; 
-                half g_depth = 1.0 / dot(depth4, half4(1.0, 1.0, 1.0, 1.0)); 
-                //如下本质是矩阵变换，矩阵每一列是采样_GNorm获得的附近4邻域的法线，而变化对象的每一个通道是深度差的倒数(这是屏幕空间法线的一种计算方式) 
+                depth4 = 1.0 / (abs(depth4 - d) + 0.0001) * scr_pat;   //[田的4个方位与中心点距离差的倒数 (差异越大数值越小)] * [4个方位的不同衰减幅度] 
+                half g_depth = 1.0 / dot(depth4, half4(1.0, 1.0, 1.0, 1.0));  //求和depth4的4个通道后取倒数 -> 作为求平均的乘子 
+                //如下本质是矩阵变换，矩阵每一列是采样_GNorm获得的附近4邻域的法线，而变化对象的每一个通道是深度差的倒数 -> 推测这是求取屏幕空间法线的一种计算方式  
+                //也可以这样理解: depth4.xyzw代表了一个未被归一化的点(第四维w不为0和1)，depth4与原点构成的向量反应了当前像素点表面法线的走势，通过连续与四周采样法线相乘和累加 
+                //使得depth4所代表的点能够被四领域的法线影响，这种影响是线性的，最终求取得到的一个三维向量(depth4.w分量已经被融合到前3维中了)
+                //d_norm 应当是兼具了反应屏幕空间法线走势，又具有较好连续性 
                 half3 d_norm = g_norm_ld.xyz * depth4.xxx + g_norm_rd.xyz * depth4.yyy + g_norm_lu.xyz * depth4.zzz + g_norm_ru.xyz * depth4.www; 
                 //1/0.0001667 = 6000 -> 推测是编码距离时使用的极大值，20000推测是缩放系数 
                 //整体来说:当d>20000时scale横为0; 当14000<d<20000时scale在[0,1]区间上线性分布; 当d<14000时scale横为1 
