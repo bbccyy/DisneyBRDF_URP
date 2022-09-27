@@ -293,24 +293,29 @@ Shader "Kena/KenaGI"
                 //以下类似矩阵运算的过程，本质是求取屏幕空间法线的一种计算方式 
                 //可以这样理解: depth4.xyzw代表了以当前像素点为中心周围4个方向的一种"梯度"，通过连续与对应方向的采样法线相乘和累加，相当于是依照梯度值大小，对4周法线的加权求和  
                 //最终结果 d_norm 应当兼具了法线走势，又具有较好连续性，且能够体现边缘处的变化 
+                //d_norm -> depth-based normal:基于深度和4领域插值的世界空间法向量 
+                //d_norm -> 还没归一化，其模长正比于物体表面的平坦程度: 既越平坦，模长越大 -> 主要归因于上式中 1/abs(depth4 - d) 部分 -> 越平坦数值越大 
                 half3 d_norm = g_norm_ld.xyz * depth4.xxx + g_norm_rd.xyz * depth4.yyy + g_norm_lu.xyz * depth4.zzz + g_norm_ru.xyz * depth4.www; 
 
                 //1/0.0001667 = 6000 -> 推测是编码距离时使用的极大值，20000推测是缩放系数 
                 //整体来说:当d>20000时scale恒为0; 当14000<d<20000时scale在[0,1]区间上线性分布; 当d<14000时scale横为1 
-                half scale = saturate((20000 - d) * 0.00016666666);      //Scale, 靠近摄像机->1，远离->0    
+                half scale = saturate((20000 - d) * 0.00016666666);      //Scale, 靠近摄像机->1，远离->0 
                 d_norm = lerp(norm, d_norm * g_depth_factor, scale);     //这张基于4邻域深度差扰动后的d_norm看起来与_GNorm很像(可能略微模糊了一点?) 
 
                 //if (condi.x)  //对于 #1 ~ #15 号渲染通道来说都能进入 
                 if (true)       //这里修改原始定义，先让所有像素进入当前分支 -> 计算GI_Diffuse_Col 
                 {
-                    //R12和R10颜色都是黑白噪点下显示人物本体Diffuse的贴图，区别在于R12对D图施加了NoV和Fresnel，而R10是直白的D图 
+                    //依据是否是 #4号通道 -> 采样不同 diffuse (R12相对于R10在人物区域相对更加暗沉一些) 
+                    //GI_Diffuse - GI_Diffuse * factor_RoughOrZero -> 调低了人物和茅屋顶的亮度 
                     half3 R15 = matCondi.z ? (R12 - R12 * factor_RoughOrZero) : (R10 - R10 * factor_RoughOrZero); 
-                    //RN 来自 _GNorm 贴图，经多次采样和叠加而得，推测是某种小范围随机和模糊后的N -> RandomNorm(或RN) 
-                    half RN_Len = sqrt(dot(d_norm, d_norm));
-                    half3 RN = d_norm / max(RN_Len, 0.00001);
+
+                    //RN 是归一化后的 d_norm -> RebuiltedNorm (或RN) 
+                    half RN_Len = sqrt(dot(d_norm, d_norm)); 
+                    half3 RN = d_norm / max(RN_Len, 0.00001); 
+                    test = RN_Len.xxxx;
                     
                     //计算AO_from_RN 
-                    half3 bias_N = (norm - RN) * RN_Len + RN; //让RN朝着Norm的方向偏折一定距离 -> r17.xyz (第一类r17)
+                    half3 bias_N = (norm - RN) * RN_Len + RN; //让RN朝着Norm的方向偏折一定距离 -> r17.xyz (第一类r17) 
                     half RNoN = dot(RN, norm); 
                     //TODO:这个AO项计算方式可摘录 
                     half AO_from_RN = lerp(RNoN, 1, RN_Len);  //通过全局法线纹理获得的AO -> r11.w 
