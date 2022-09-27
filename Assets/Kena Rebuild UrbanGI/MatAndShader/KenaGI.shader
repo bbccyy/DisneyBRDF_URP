@@ -335,11 +335,11 @@ Shader "Kena/KenaGI"
                     half AO_final = AO_blend_Type ? min_of_3_ao : mul_of_compuao_and_min_tx_ss_ao; 
 
                     uint4 matCondi2 = condi.xxxx == uint4(6, 2, 3, 7).xyzw; 
-                    half3 frxxPow2 = frxx_condi.xyz * frxx_condi.xyz;  //不明白这样处理纹理的原因,该数值与材质本身关联 
+                    half3 frxxPow2 = frxx_condi.xyz * frxx_condi.xyz;  //该变量作用推测是作为颜色遮罩 -> 只对人物+草叶生效(尤其是人物) 
                     half3 ao_diffuse_from_6 = half3(0, 0, 0); 
-                    half3 ao_diffuse_common = half3(0, 0, 0);   //非 #6 号渲染通路也会在后面用类似如下的方法计算 common 变量 
-                    //if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_diffuse_from_6 
-                    if(true) //TODO DELETE 
+                    half3 ao_diffuse_common = half3(0, 0, 0);  //非 #6 号渲染通路也会在后面用类似如下的方法计算 common 变量 
+                    if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_diffuse_from_6 
+                    //if(true) //TODO DELETE 
                     {
                         half4 neg_norm = half4(-norm.xyz, 1); 
                         half3 bias_neg_norm1 = mul(M_CB1_181, neg_norm);  //结果类似灰度图，主要区分了朝上和朝下方向的法线 
@@ -348,10 +348,9 @@ Shader "Kena/KenaGI"
                         //base_disturb * scale + bias 
                         ao_diffuse_from_6 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2);
                         ao_diffuse_from_6 = V_CB1_180 * max(ao_diffuse_from_6, half3(0, 0, 0)); 
-                        //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
-                        ao_diffuse_from_6 = AO_final * ao_diffuse_from_6 * frxxPow2; 
 
-                        test.xyz = 0 + bias_neg_norm1;
+                        //#6号渲染通路对应的 AO -> 使用了 frxxPow2 作为遮罩，只对人物(还有草叶等)生效 
+                        ao_diffuse_from_6 = AO_final * ao_diffuse_from_6 * frxxPow2; 
                     }
 
                     tmp1 = matCondi2.y | matCondi2.z; //#2 或 #3 号渲染通道 
