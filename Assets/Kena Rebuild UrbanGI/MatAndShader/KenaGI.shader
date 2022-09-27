@@ -186,8 +186,8 @@ Shader "Kena/KenaGI"
                 half2 chessMask = chessboard ? half2(1, 0) : half2(0, 1); 
 
                 //Sample _R_I_F_R 
-                float4 rifr = SAMPLE_TEXTURE2D(_R_I_F_R, sampler_R_I_F_R, suv); 
-                uint flag = (uint)round(rifr.z * 255);
+                half4 rifr = SAMPLE_TEXTURE2D(_R_I_F_R, sampler_R_I_F_R, suv); 
+                uint flag = (uint)round(rifr.z * 255.0);
                 uint2 condi = flag & uint2(15, 16);//condi.x控制像素渲染逻辑(颜色表现丰富则噪点密集，表现单一则成块同色), y控制颜色混合;  
                 /* 对condi的计算等效如下代码: 
                 uint2 condi = uint2(flag & 0x0000000F, flag & 0x00000010); */ 
@@ -289,18 +289,19 @@ Shader "Kena/KenaGI"
                 //组合4次采样的深度 
                 half4 depth4 = half4(g_norm_ld.w, g_norm_rd.w, g_norm_lu.w, g_norm_ru.w); //注,这里的w通道存放单位为里面的距离 
                 depth4 = 1.0 / (abs(depth4 - d) + 0.0001) * scr_pat;   //[田的4个方位与中心点距离差的倒数 (差异越大数值越小)] * [4个方位的不同衰减幅度] 
-                half g_depth = 1.0 / dot(depth4, half4(1.0, 1.0, 1.0, 1.0));  //求和depth4的4个通道后取倒数 -> 作为求平均的乘子 
+                half g_depth_factor = 1.0 / dot(depth4, half4(1.0, 1.0, 1.0, 1.0));  //求和depth4的4个通道后取倒数 -> 作为求平均的乘子 
                 //以下类似矩阵运算的过程，本质是求取屏幕空间法线的一种计算方式 
                 //可以这样理解: depth4.xyzw代表了以当前像素点为中心周围4个方向的一种"梯度"，通过连续与对应方向的采样法线相乘和累加，相当于是依照梯度值大小，对4周法线的加权求和  
                 //最终结果 d_norm 应当兼具了法线走势，又具有较好连续性，且能够体现边缘处的变化 
                 half3 d_norm = g_norm_ld.xyz * depth4.xxx + g_norm_rd.xyz * depth4.yyy + g_norm_lu.xyz * depth4.zzz + g_norm_ru.xyz * depth4.www; 
-                test.xyzw = depth4;
-                //1/0.0001667 = 6000 -> 推测是编码距离时使用的极大值，20000推测是缩放系数 
-                //整体来说:当d>20000时scale横为0; 当14000<d<20000时scale在[0,1]区间上线性分布; 当d<14000时scale横为1 
-                half scale = saturate((20000 - d) * 0.00016666666);      //Scale, 靠近摄像机->1，远离->0 
-                d_norm = scale * (d_norm * g_depth - norm) + norm;       //这张基于4邻域深度差扰动后的d_norm看起来与_GNorm很像(可能略微模糊了一点?) 
 
-                if (condi.x)  //对于 #1 ~ #15 号渲染通道来说都能进入 
+                //1/0.0001667 = 6000 -> 推测是编码距离时使用的极大值，20000推测是缩放系数 
+                //整体来说:当d>20000时scale恒为0; 当14000<d<20000时scale在[0,1]区间上线性分布; 当d<14000时scale横为1 
+                half scale = saturate((20000 - d) * 0.00016666666);      //Scale, 靠近摄像机->1，远离->0    
+                d_norm = lerp(norm, d_norm * g_depth_factor, scale);     //这张基于4邻域深度差扰动后的d_norm看起来与_GNorm很像(可能略微模糊了一点?) 
+
+                //if (condi.x)  //对于 #1 ~ #15 号渲染通道来说都能进入 
+                if (true)       //这里修改原始定义，先让所有像素进入当前分支 -> 计算GI_Diffuse_Col 
                 {
                     //R12和R10颜色都是黑白噪点下显示人物本体Diffuse的贴图，区别在于R12对D图施加了NoV和Fresnel，而R10是直白的D图 
                     half3 R15 = matCondi.z ? (R12 - R12 * factor_RoughOrZero) : (R10 - R10 * factor_RoughOrZero); 
