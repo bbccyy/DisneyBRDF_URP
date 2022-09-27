@@ -310,26 +310,29 @@ Shader "Kena/KenaGI"
                     half3 R15 = matCondi.z ? (R12 - R12 * factor_RoughOrZero) : (R10 - R10 * factor_RoughOrZero); 
 
                     //RN 是归一化后的 d_norm -> RebuiltedNorm (或RN) 
-                    half RN_Len = sqrt(dot(d_norm, d_norm)); 
+                    half RN_Len = sqrt(dot(d_norm, d_norm));  //前面以及提及，RN_Len正比于物体表面的平坦程度 
                     half3 RN = d_norm / max(RN_Len, 0.00001); 
-                    test = RN_Len.xxxx;
                     
+                    //后续会使用的表面法线向量(对于 #7号渲染通道，会改写这个值)
+                    half3 bias_N = lerp(RN, norm, RN_Len);  //对于平坦表面使用norm，边缘以及陡峭表面使用RN 
+
                     //计算AO_from_RN 
-                    half3 bias_N = (norm - RN) * RN_Len + RN; //让RN朝着Norm的方向偏折一定距离 -> r17.xyz (第一类r17) 
-                    half RNoN = dot(RN, norm); 
-                    //TODO:这个AO项计算方式可摘录 
-                    half AO_from_RN = lerp(RNoN, 1, RN_Len);  //通过全局法线纹理获得的AO -> r11.w 
+                    half RNoN = dot(RN, norm); //基于深度的法线 RN 与纹理法线 norm 之间的相似度 
+                    half AO_from_RN = lerp(RNoN, 1, RN_Len);  //推测为AO -> 完全平坦时总是1，崎岖陡峭处返回RNoN -> 此时这个值也会很小  
 
-                    //计算AO_final, 备注:log2_n = 1.442695 * ln_n 
+                    //计算 computed_ao
+                    //备注1:log2_n = 1.442695 * ln_n 
+                    //备注2:推测是经验公式(待考) -> 但是输出 computed_ao 可见对锐利边缘和暗部的检测效果很好 
                     half computed_ao = saturate(40.008 /(exp(-0.01*(RN_Len * 10.0 - 5))+1) - 19.504); 
-                    computed_ao = pow(computed_ao, 0.7); 
-                    computed_ao = lerp(computed_ao, 1, 0);  //rate = 0 -> 来自cb0[1].w 
+                    computed_ao = pow(computed_ao, 0.7);    //0.7 -> cb0[8].w 
+                    computed_ao = lerp(computed_ao, 1, 0);  //  0 -> cb0[1].w 
 
+                    //以下计算AO_final -> 使用了 纹理采样的ao(df.w)，屏幕空间ao(ao)，以及上面计算的computed_ao进行多重混淆 
                     uint AO_blend_Type = (0 == 1); //其中 1 来自 cb0[9].x 
                     half min_of_texao_and_ssao = min(df.w, ao); //min(Tex_AO, SSAO) 
                     half min_of_3_ao = min(computed_ao, min_of_texao_and_ssao); 
-                    half mul_of_compao_and_minao = computed_ao * min_of_texao_and_ssao; 
-                    half AO_final = AO_blend_Type ? min_of_3_ao : mul_of_compao_and_minao; 
+                    half mul_of_compuao_and_min_tx_ss_ao = computed_ao * min_of_texao_and_ssao; 
+                    half AO_final = AO_blend_Type ? min_of_3_ao : mul_of_compuao_and_min_tx_ss_ao; 
 
                     uint4 matCondi2 = condi.xxxx == uint4(6, 2, 3, 7).xyzw; 
                     half3 frxxPow2 = frxx_condi.xyz * frxx_condi.xyz;  //不明白这样处理纹理的原因,该数值与材质本身关联 
@@ -354,7 +357,8 @@ Shader "Kena/KenaGI"
                     if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse -> 覆盖到 R15.xyz  
                     {
                         half3 refractDirRaw = NoV * (-norm) + viewDir; 
-                        half3 refractDir = normalize(refractDirRaw);  // ->r17.xyz (第二类r17) 
+                        half3 refractDir = normalize(refractDirRaw);   
+                        bias_N = refractDir;    //注: 该分支需要改写了bias_N的取值，bias_N后续会继续参与运算 
                         half rough_7 = min(1.0, max(rifr.w, 0.003922)); 
                         half3 RoV = dot(refractDir, -viewDir); 
                         half3 RoN = dot(refractDir, norm); 
