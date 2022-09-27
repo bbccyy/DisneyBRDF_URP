@@ -328,8 +328,8 @@ Shader "Kena/KenaGI"
                     computed_ao = lerp(computed_ao, 1, 0);  //  0 -> cb0[1].w 
 
                     //以下计算AO_final -> 使用了 纹理采样的ao(df.w)，屏幕空间ao(ao)，以及上面计算的computed_ao进行多重混淆 
-                    uint AO_blend_Type = (0 == 1); //其中 1 来自 cb0[9].x 
-                    half min_of_texao_and_ssao = min(df.w, ao); //min(Tex_AO, SSAO) 
+                    uint AO_blend_Type = (0 == 1);                  //其中 1 来自 cb0[9].x 
+                    half min_of_texao_and_ssao = min(df.w, ao);     //min(Tex_AO, SSAO) 
                     half min_of_3_ao = min(computed_ao, min_of_texao_and_ssao); 
                     half mul_of_compuao_and_min_tx_ss_ao = computed_ao * min_of_texao_and_ssao; 
                     half AO_final = AO_blend_Type ? min_of_3_ao : mul_of_compuao_and_min_tx_ss_ao; 
@@ -337,18 +337,21 @@ Shader "Kena/KenaGI"
                     uint4 matCondi2 = condi.xxxx == uint4(6, 2, 3, 7).xyzw; 
                     half3 frxxPow2 = frxx_condi.xyz * frxx_condi.xyz;  //不明白这样处理纹理的原因,该数值与材质本身关联 
                     half3 ao_diffuse_from_6 = half3(0, 0, 0); 
-                    half3 ao_diffuse_common = half3(0, 0, 0); //非 #6 号渲染通路也会在后面用类似如下的方法计算 common 变量 
-                    if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_diffuse_from_6 
+                    half3 ao_diffuse_common = half3(0, 0, 0);   //非 #6 号渲染通路也会在后面用类似如下的方法计算 common 变量 
+                    //if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_diffuse_from_6 
+                    if(true) //TODO DELETE 
                     {
                         half4 neg_norm = half4(-norm.xyz, 1); 
-                        half3 bias_neg_norm1 = mul(M_CB1_181, neg_norm); 
-                        neg_norm = norm.yzzx * norm.xyzz; 
-                        half3 bias_neg_norm2 = mul(M_CB1_184, neg_norm); 
+                        half3 bias_neg_norm1 = mul(M_CB1_181, neg_norm);  //结果类似灰度图，主要区分了朝上和朝下方向的法线 
+                        half3 rd_norm = norm.yzzx * norm.xyzz; 
+                        half3 bias_neg_norm2 = mul(M_CB1_184, rd_norm);   //只对某个特定方向有响应，其余地方数值趋向于0 
                         //base_disturb * scale + bias 
                         ao_diffuse_from_6 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2);
-                        ao_diffuse_from_6 = V_CB1_180 * max(ao_diffuse_from_6, half3(0, 0, 0));
+                        ao_diffuse_from_6 = V_CB1_180 * max(ao_diffuse_from_6, half3(0, 0, 0)); 
                         //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
-                        ao_diffuse_from_6 = AO_final * ao_diffuse_from_6 * frxxPow2;
+                        ao_diffuse_from_6 = AO_final * ao_diffuse_from_6 * frxxPow2; 
+
+                        test.xyz = 0 + bias_neg_norm1;
                     }
 
                     tmp1 = matCondi2.y | matCondi2.z; //#2 或 #3 号渲染通道 
