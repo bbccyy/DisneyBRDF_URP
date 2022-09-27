@@ -141,11 +141,16 @@ Shader "Kena/KenaGI"
                 half4 test = half4(0, 0, 0, 0);  //JUST FOR SHOW-RESULTS 
 
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(IN);
-                
+
+                //最终输出值
                 half4 output = half4(0, 0, 0, 0);
+
+                //辅助临时变量(存放计算中间量) 
                 half tmp1 = 0; 
                 half2 tmp2 = half2(0, 0);
+                half3 tmp_col = half3(0, 0, 0);
 
+                //Start here 
                 half2 suv = IN.vertex.xy * screen_param.zw;     //screen uv 
                 half2 coord = (IN.vertex.xy * screen_param.zw - 0.5) * IN.vertex.w * 2.0;  //[-1, +1] 
 
@@ -232,7 +237,7 @@ Shader "Kena/KenaGI"
                 //计算R12颜色 -> 按照视角的大小，表现出由暗到明的过渡(边缘暗中间亮) 
                 //另外，(col^2 - col)*t + col -> 这种模式的颜色操作等效于对原始颜色进行 "非线性提亮" 
                 half3 R12 = R10.xyz * 1.111111; 
-                half3 tmp_col = 0.85 * (NoV_sat - 1) * (1 - (R12 - 0.78*(R12 * R12 - R12))) + 1; 
+                tmp_col = 0.85 * (NoV_sat - 1) * (1 - (R12 - 0.78*(R12 * R12 - R12))) + 1; 
                 R12 = R12 * tmp_col;    //将基于NoV的环境光强度 -> 作用到 R10 颜色上(边缘压暗，中间相对提亮) 
 
                 //施加Fresnel影响 
@@ -247,9 +252,10 @@ Shader "Kena/KenaGI"
                 //R12颜色可以认为是基于R10(环境光基础色)进行边缘压暗(中间相对提亮)操作后的结果，与上式tmp_col比更加暗沉
                 //注意R12 = R10 * (一次NoV压暗) * (第二次NoV压暗) 
                 R12 = 0.9 * NoV_nearOne * R12; 
-                R12 = lerp(tmp_col, R12, frxx_condi.x * factor_RoughOrZero);  //lerp中的Rate在绝大部分情况下趋于 0 
-
-                test.xyz = (frxx_condi.x * factor_RoughOrZero).xxx;
+                //factor_RoughOrZero主要来自贴图rifr.x通道，只有人物和茅草屋顶有值 
+                //frxx_condi.x * factor_RoughOrZero叠加后获得人物有值的遮罩 
+                //通过lerp，在人物区域用上式中计算出的R12颜色(相对更加暗沉一些)，其他区域用tmp_col颜色(相对亮一些) 
+                R12 = lerp(tmp_col, R12, frxx_condi.x * factor_RoughOrZero); 
 
                 //采样AO
                 half ao = SAMPLE_TEXTURE2D(_AO, sampler_AO, suv); 
@@ -268,20 +274,22 @@ Shader "Kena/KenaGI"
 
                 //多次采样GlobalNormal 
                 half4 tmp_uv = half_cur_uv.xyxy + half4(one_over_half_pixels.x, 0, 0, one_over_half_pixels.y); 
-                half4 g_norm_ld = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, half_cur_uv.xy); 
-                half4 g_norm_rd = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.xy); 
-                half4 g_norm_lu = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.zw); 
-                half4 g_norm_ru = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.xw); 
+                half4 g_norm_ld = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.zy); //左下 
+                half4 g_norm_rd = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.xy); //右下 
+                half4 g_norm_lu = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.zw); //左上 
+                half4 g_norm_ru = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, tmp_uv.xw); //右上 
 
                 //利用(全局法线 & 深度)的差异做扰动，求颜色 R13 
-                //首先下面基于屏幕像素索引的“奇偶”性，组合出一定随机特性的屏幕空间纹理 
-                tmp2 = 1 - delta_half_pixels; 
+                //首先下面基于屏幕像素索引的“奇偶”性，组合出网格状屏幕空间纹理 
+                //从功能上看，scr_pat.xyzw 分别对应田字中左下，右，上和右上4个方位上像素(深度)的衰减值 
+                tmp2 = (half2(1, 1) - delta_half_pixels).yx; 
                 half4 scr_pat = half4(tmp2.x * tmp2.y, 
-                    delta_half_pixels * tmp2, 
+                    (delta_half_pixels * tmp2).xy, 
                     delta_half_pixels.x * delta_half_pixels.y); 
                 //组合4次采样的深度 
                 half4 depth4 = half4(g_norm_ld.w, g_norm_rd.w, g_norm_lu.w, g_norm_ru.w); //注,这里的w通道存放单位为里面的距离 
                 depth4 = 1.0 / (abs(depth4 - d) + 0.0001) * scr_pat;   //r13.xyzw 
+                test = depth4; 
                 half g_depth = 1.0 / dot(depth4, half4(1.0, 1.0, 1.0, 1.0)); 
                 //如下本质是矩阵变换，矩阵每一列是采样_GNorm获得的附近4邻域的法线，而变化对象的每一个通道是深度差的倒数(这是屏幕空间法线的一种计算方式) 
                 half3 d_norm = g_norm_ld.xyz * depth4.xxx + g_norm_rd.xyz * depth4.yyy + g_norm_lu.xyz * depth4.zzz + g_norm_ru.xyz * depth4.www; 
