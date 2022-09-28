@@ -95,6 +95,9 @@ Shader "Kena/KenaGI"
                 float4(-0.00000010974, 0.411912322044372, 0.445718020200729, -6150.4560546875),
                 float4(0, 0, 0, 1)
                 );
+            static float3 V_CB1_48 = float3(0.67306363582611, -0.465476632118225, -0.00000010974);
+            static float3 V_CB1_49 = float3(0.116760797798633, 0.168832123279571, 0.411912322044372);
+            static float3 V_CB1_50 = float3(-0.509014785289764, -0.736369132995605, 0.445718020200729);
 
             static float4x4 M_CB1_181 = float4x4(
                 float4(0.002263982, -0.06811329, 0.245573655, 0.342455983),
@@ -360,6 +363,10 @@ Shader "Kena/KenaGI"
                     //if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse -> 覆盖到 R15.xyz 
                     if (true) //TODO DELETE 
                     {
+                        //TODO -> 用 coord.xy 和 V_CB1_48 等，重构viewDir' 
+                        // ... 
+
+
                         half3 viewTangentRaw = NoV * (-norm) + viewDir;  //viewTangentRaw(vt) 
                         half3 viewTangent = normalize(viewTangentRaw); 
                         bias_N = viewTangent;    //注: 该分支需要改写了bias_N的取值，bias_N后续会继续参与运算 
@@ -369,14 +376,18 @@ Shader "Kena/KenaGI"
                         half ToV = dot(viewTangent, viewDir);   //ToV -> 掠视时得到最大值1;俯视时得最小值0; 45度斜视时得0.5
                         half ToN = dot(viewTangent, norm);      //ToN -> 横为0，因为Tangent和Nornmal互相垂直 
                         //test = ToN.xxxx * 1000; //作为验证，可以开启这段代码(需确保总是进入当前分支) 
-                        half ang_NoV = acos(NoV); //NoV=1是代表V和N同向(俯视)，acos(1)=0，既俯视时偏暗；反之掠视时偏亮(最大得pi/2) 
+                        half ang_NoV = acos(NoV); //我们知道NoV=1代表V和N同向(俯视) -> ang_NoV = acos(1) = 0，既俯视时偏暗；反之掠视时偏亮(最大得pi/2) 
                         //test = ang_NoV.xxxx / (_pi); //验证用 
                         half ang_ToN = acos(ToN); //应该恒为 pi/2 
                         //test = ang_ToN.xxxx / (_pi/2) * 0.5; //作为验证，使用renderdoc截取此输出，经过像素检测可知各处等于 0.5 -> 符合acos(0) = pi/2 的结果 
 
-                        half cos_half_angle_VtoRneg = cos(abs(ang_NoV - ang_ToN) * 0.5); 
+                        half cos_half_angle_TtoV = cos(abs(ang_NoV - ang_ToN) * 0.5); //俯视时为cos(π/4)=sqrt(2)/2，掠视时为cos(0)=1 
+                        //test = cos_half_angle_TtoV.xxxx; //使用renderoc截帧查看俯视角度像素 -> 最小值在0.75附近 -> 符合预估的sqrt(2)/2 
 
                         half3 V_hori = norm * (-ToN) + viewTangent; //获得朝向折射方向的 "水平向量" -> Vector_Horizontal 
+                        //test.xyz = V_hori;
+                        test.xyz = viewTangent;
+
                         half RefrawDotHori = dot(V_hori, viewTangentRaw);
                         tmp1 = dot(V_hori, V_hori) * dot(viewTangentRaw, viewTangentRaw) + 0.0001;
                         tmp1 = RefrawDotHori* (1.0 / sqrt(tmp1)); //相当于求 |V_hori| * |RefracRaw|的倒数  
@@ -414,10 +425,10 @@ Shader "Kena/KenaGI"
 
                         tmp1 = exp((-0.5 * pow2(NoV - 0.14)) / pow2(rough_factor_2)) / (rough_factor_2 * 2.506628); //2.506=sqrt(2π) 
 
-                        half R10W = 0.953479 * pow5(1 - 0.5 * cos_half_angle_VtoRneg) + 0.046521;  //颜色强度 or AO 关联值 
+                        half R10W = 0.953479 * pow5(1 - 0.5 * cos_half_angle_TtoV) + 0.046521;  //颜色强度 or AO 关联值 
                         R10W = pow2(1 - R10W) * R10W; 
 
-                        half3 df_chan7 = exp(log(R10.xyz) * (0.8 / cos_half_angle_VtoRneg));  // #7 渲染通道使用的 df，经过了调整 
+                        half3 df_chan7 = exp(log(R10.xyz) * (0.8 / cos_half_angle_TtoV));  // #7 渲染通道使用的 df，经过了调整 
                         df_chan7 = df_chan7* tmp1* exp(cos_VhroiToRefract_adjust2.y)* R10W + factor_RoV * R1Y; 
 
                         tmp1 = lerp(min(0.25 * (1 + dot(viewTangent, viewTangent)), 1.0), (1 - abs(ToN)), 0.33) * factor_RoughOrZero * 0.318310;
