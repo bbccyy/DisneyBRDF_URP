@@ -165,8 +165,9 @@ Shader "Kena/KenaGI"
                 //use matrix_Inv_VP to rebuild posWS 
                 float4 posWS = mul(M_Inv_VP, hclip);  //注意此时单位还是 "厘米" 
 
-                //ViewDir (使用时取反: 从视点触发指向摄像机) 
-                half3 viewDir = normalize(posWS.xyz - camPosWS); 
+                //cameraToPixelDir (取反得viewDir: 从视点触发指向摄像机) 
+                half3 cameraToPixelDir = normalize(posWS.xyz - camPosWS); 
+                half3 viewDir = -cameraToPixelDir;
                 /*
                 //开启这段代码用于交叉验证 posWS的准确性 -> 如果posWS不是像素点的世界坐标
                 //那么摄像机世界坐标到posWS所描述的点的距离不会出现由进到远的分层效果 
@@ -226,7 +227,7 @@ Shader "Kena/KenaGI"
                 R10 = is9or5 ? R10 : half4(df.xyz, rifr.y);  //部分人物+窗户等物件显示diffse,其他近似黑白噪点 
 
                 //计算优化后的 NoV 输出到 df_base.w 中 -> 不是Lambert(NoL)，也不是Phong(NoH)，应该和Fresnel或漫反射强度相关 
-                half NoV = dot(norm, -viewDir);
+                half NoV = dot(norm, viewDir);
                 half NoV_sat = saturate(NoV);
                 half a = (NoV_sat * 0.5 + 0.5) * NoV_sat - 1.0; //大体上在[-1, 0]区间上成二次弧线分布，N和V垂直得-1 
                 half b = saturate(1.25 - 1.25 * rifr.w); //与纹理.rough2成反比，且整体调整了偏移和缩放 
@@ -353,25 +354,31 @@ Shader "Kena/KenaGI"
                         ao_diffuse_from_6 = AO_final * ao_diffuse_from_6 * frxxPow2; 
                     }
 
-                    tmp1 = matCondi2.y | matCondi2.z; //#2 或 #3 号渲染通道 
-                    R15 = tmp1 ? (frxxPow2 + R15) : R15;   //base_diffuse 
+                    uint is2or3 = matCondi2.y | matCondi2.z;  //#2 或 #3 号渲染通道 
+                    R15 = is2or3 ? (frxxPow2 + R15) : R15;    //TODO: frxxPow2 + R15 -> T11.xyz 的具体含义 
 
-                    if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse -> 覆盖到 R15.xyz  
+                    //if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse -> 覆盖到 R15.xyz 
+                    if (true) //TODO DELETE 
                     {
-                        half3 refractDirRaw = NoV * (-norm) + viewDir; 
-                        half3 refractDir = normalize(refractDirRaw);   
-                        bias_N = refractDir;    //注: 该分支需要改写了bias_N的取值，bias_N后续会继续参与运算 
+                        half3 viewTangentRaw = NoV * (-norm) + viewDir;  //viewTangentRaw(vt) 
+                        half3 viewTangent = normalize(viewTangentRaw); 
+                        bias_N = viewTangent;    //注: 该分支需要改写了bias_N的取值，bias_N后续会继续参与运算 
+
                         half rough_7 = min(1.0, max(rifr.w, 0.003922)); 
-                        half3 RoV = dot(refractDir, -viewDir); 
-                        half3 RoN = dot(refractDir, norm); 
-                        half ang_NoV = acos(NoV); 
-                        half ang_RoN = acos(RoN); 
 
-                        half cos_half_angle_VtoRneg = cos(abs(ang_NoV - ang_RoN) * 0.5); 
+                        half ToV = dot(viewTangent, viewDir);   //ToV -> 掠视时得到最大值1;俯视时得最小值0; 45度斜视时得0.5
+                        half ToN = dot(viewTangent, norm);      //ToN -> 横为0，因为Tangent和Nornmal互相垂直 
+                        //test = ToN.xxxx * 1000; //作为验证，可以开启这段代码(需确保总是进入当前分支) 
+                        half ang_NoV = acos(NoV); //NoV=1是代表V和N同向(俯视)，acos(1)=0，既俯视时偏暗；反之掠视时偏亮(最大得pi/2) 
+                        //test = ang_NoV.xxxx / (_pi); //验证用 
+                        half ang_ToN = acos(ToN); //应该恒为 pi/2 
+                        //test = ang_ToN.xxxx / (_pi/2) * 0.5; //作为验证，使用renderdoc截取此输出，经过像素检测可知各处等于 0.5 -> 符合acos(0) = pi/2 的结果 
 
-                        half3 V_hori = norm * (-RoN) + refractDir; //获得朝向折射方向的 "水平向量" -> Vector_Horizontal 
-                        half RefrawDotHori = dot(V_hori, refractDirRaw);
-                        tmp1 = dot(V_hori, V_hori) * dot(refractDirRaw, refractDirRaw) + 0.0001;
+                        half cos_half_angle_VtoRneg = cos(abs(ang_NoV - ang_ToN) * 0.5); 
+
+                        half3 V_hori = norm * (-ToN) + viewTangent; //获得朝向折射方向的 "水平向量" -> Vector_Horizontal 
+                        half RefrawDotHori = dot(V_hori, viewTangentRaw);
+                        tmp1 = dot(V_hori, V_hori) * dot(viewTangentRaw, viewTangentRaw) + 0.0001;
                         tmp1 = RefrawDotHori* (1.0 / sqrt(tmp1)); //相当于求 |V_hori| * |RefracRaw|的倒数  
                         tmp1 = RefrawDotHori* tmp1; // AdotB/(|A|*|B|) -> cos<AB> -> cos(V_hori和Refract的夹角) 
                         //以下可以看做是对cosθ的两种不同range调整  
@@ -391,33 +398,34 @@ Shader "Kena/KenaGI"
                         rough_factor_1 = tmp1* rough_factor_1; 
                         tmp2 = half2(1.414214, 3.544908)* rough_factor_1; //数值->(sqrt(2), 2*sqrt(π)) 
 
-                        half R5Z = (NoV + RoN) - (-0.139886) * twist; //记为 R5Z 
+                        half R5Z = (NoV + ToN) - (-0.139886) * twist; //记为 R5Z 
                         R5Z = -0.5 * R5Z * R5Z; 
                         R5Z = R5Z / (tmp2.x* tmp2.x); 
                         // exp(-0.5 * R5Z^2 / (2*cos_VhoR*(roughness^2+0.2)^2)) / (2sqrt(π)*sqrt(cos_VhoR)*(roughness^2 + 0.2)) 
-                        // 其中 R5Z = (NdotV + RoN)-(-0.139886)*(0.997*sqrt(cos_VhroiToRefract)*sinθ-0.069943*cosθ) 
+                        // 其中 R5Z = (NdotV + ToN)-(-0.139886)*(0.997*sqrt(cos_VhroiToRefract)*sinθ-0.069943*cosθ) 
                         R5Z = exp(R5Z) / tmp2.y; 
                         tmp1 = tmp1 * R5Z; // sqrt(cos_VhoR*0.5+0.5) * (上式) -> 记为 R5Z' 
 
-                        tmp1 = tmp1 * (0.953479 * pow5(1 - sqrt(saturate(RoV * 0.5 + 0.5))) + 0.046521); 
+                        tmp1 = tmp1 * (0.953479 * pow5(1 - sqrt(saturate(ToV * 0.5 + 0.5))) + 0.046521);
                         half R1Y = 0.5 * R10.w * tmp1;   //记为R1Y TODO: 给个名字? 
 
-                        half RoV_po = saturate(-RoV); 
+                        half RoV_po = saturate(-ToV);
                         half factor_RoV = 1 - RoV_po;   //当掠射或垂直时得0，当视线成45度角时得最大值0.3左右 
 
                         tmp1 = exp((-0.5 * pow2(NoV - 0.14)) / pow2(rough_factor_2)) / (rough_factor_2 * 2.506628); //2.506=sqrt(2π) 
 
                         half R10W = 0.953479 * pow5(1 - 0.5 * cos_half_angle_VtoRneg) + 0.046521;  //颜色强度 or AO 关联值 
                         R10W = pow2(1 - R10W) * R10W; 
-                        //TODO: 确认如下使用exp还是exp2  bh 
+
                         half3 df_chan7 = exp(log(R10.xyz) * (0.8 / cos_half_angle_VtoRneg));  // #7 渲染通道使用的 df，经过了调整 
                         df_chan7 = df_chan7* tmp1* exp(cos_VhroiToRefract_adjust2.y)* R10W + factor_RoV * R1Y; 
 
-                        tmp1 = lerp(min(0.25 * (1 + dot(refractDir, refractDir)), 1.0), (1 - abs(RoN)), 0.33) * factor_RoughOrZero * 0.318310;
+                        tmp1 = lerp(min(0.25 * (1 + dot(viewTangent, viewTangent)), 1.0), (1 - abs(ToN)), 0.33) * factor_RoughOrZero * 0.318310;
                         
                         R10.xyz = sqrt(R10.xyz) * tmp1 + df_chan7; 
                         R10.xyz = min(-R10.xyz, half3(0, 0, 0)); //结合下面乘 -π -> 这一步作用是抹去负数 
                         R15.xyz = R10.xyz * half3(-_pi, -_pi, -_pi); //π * (由折射夹角和粗糙度系数等换算出来的新df) -> 一种基础漫反射 
+                    
                     }
 
                     uint is8 = condi.x == uint(8);
@@ -463,7 +471,7 @@ Shader "Kena/KenaGI"
                     tmp1 = (frxx_condi.x * df_base.w + 1) * 0.08; //df_base.w是与rough和NoV有关的值，处于[-1,0]区间；frxx_condi.x作为遮罩用于屏蔽指定像素 
                     R11.xyz = factor_RoughOrZero * (R12.xyz - tmp1.xxx) + tmp1.xxx; //R11颜色是基于R12颜色做的微调 
                     df_base.xyz = matCondi.z ? R11.xyz : df_base.xyz;  //如果是 #4 渲染通道 设置 df_base 为 上面计算出来的R11颜色 
-                    half3 VR = (NoV + NoV) * norm + viewDir;  //View_Reflection -> VR:视线反射方向 
+                    half3 VR = (NoV + NoV) * norm + cameraToPixelDir;  //View_Reflection -> VR:视线反射方向 
                     half roughSquare = rifr.w* rifr.w;
                     //下式对应函数图像 -> 可近似为开口朝向的二次曲线，过y轴正1，同时与x轴正负1相交 
                     half rate = (roughSquare + sqrt(1 - roughSquare)) * (1 - roughSquare);  //约 0.63 -> 某种rate系数 
