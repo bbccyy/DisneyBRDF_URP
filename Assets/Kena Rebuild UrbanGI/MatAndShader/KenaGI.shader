@@ -431,8 +431,8 @@ Shader "Kena/KenaGI"
                         half lambert_intensity = pow2(1 - tmp1) * tmp1; //注意这个强度遮罩与前面菲涅尔遮罩不同，属于俯视时强度值大的类型 
 
                         half3 df_chan7 = pow(R10.xyz, 0.8/cos_half_angle_TtoV); //对R10漫反射颜色修正，俯视角下不变，掠视情况下提亮  
-                        df_chan7 = df_chan7 * bright_fresnel_intensity * exp(cos_AtoT_ST.y)* lambert_intensity + factor_ToV * gi_fresnel_dark_intensity;
-                        
+                        df_chan7 = df_chan7 * bright_fresnel_intensity * exp(cos_AtoT_ST.y) * lambert_intensity + factor_ToV * 0.5 * gi_fresnel_dark_intensity; 
+                        //test.xyz = df_chan7; //检视节点结果 
 
                         tmp1 = lerp(min(0.25 * (1 + dot(dir_A, dir_A)), 1.0), (1 - abs(ToN)), 0.33) * factor_RoughOrZero * 0.318310;
                         
