@@ -216,7 +216,7 @@ Shader "Kena/KenaGI"
                 //可见粗糙度越高 -> 越接近采样获得的diffuse；粗糙度越低/或者是#9号通道 -> 颜色退化成某种自定义的强度值 
                 half4 df_base = half4( lerp(base_intensity.xxx, df.xyz, factor_RoughOrZero).xyz, 0 ); 
                 //test = df_base;  //可以看出 rifr.y 似乎是不同材质漫反射强度基础值，经过和diffuse贴图lerp后，腰带和茅屋顶部分拥有3个通道不同的强度分布，其余部分依旧类似 rifr.y 的分布 
-                
+                test.xyz = df;
                 //计算R10颜色 -> diffuse_base_col 
                 uint is9or5 = matCondi.x | matCondi.y; 
                 uint flag_r7z = 0;  // 0 < cb1[155].x ?  -> 注: 修改如下几个控制flag，会极大影响diffuse表现 
@@ -262,7 +262,7 @@ Shader "Kena/KenaGI"
                 //frxx_condi.x * factor_RoughOrZero叠加后获得人物有值的遮罩 
                 //通过lerp，在人物区域用上式中计算出的R12颜色(相对更加暗沉一些)，其他区域用tmp_col颜色(相对亮一些) 
                 R12 = lerp(tmp_col, R12, frxx_condi.x * factor_RoughOrZero); 
-
+                
                 //采样AO
                 half ao = SAMPLE_TEXTURE2D(_AO, sampler_AO, suv); 
 
@@ -344,8 +344,8 @@ Shader "Kena/KenaGI"
                     half3 frxxPow2 = frxx_condi.xyz * frxx_condi.xyz;  //该变量作用推测是作为颜色遮罩 -> 只对人物+草叶生效(尤其是人物) 
                     half3 ao_diffuse_from_6 = half3(0, 0, 0); 
                     half3 ao_diffuse_common = half3(0, 0, 0);  //非 #6 号渲染通路也会在后面用类似如下的方法计算 common 变量 
-                    if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_diffuse_from_6 
-                    //if(true) //TODO DELETE 
+                    //if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_diffuse_from_6 
+                    if(false) //TODO DELETE 
                     {
                         half4 neg_norm = half4(-norm.xyz, 1); 
                         half3 bias_neg_norm1 = mul(M_CB1_181, neg_norm);  //结果类似灰度图，主要区分了朝上和朝下方向的法线 
@@ -359,11 +359,13 @@ Shader "Kena/KenaGI"
                         ao_diffuse_from_6 = AO_final * ao_diffuse_from_6 * frxxPow2; 
                     }
 
-                    uint is2or3 = matCondi2.y | matCondi2.z;  //#2 或 #3 号渲染通道 
+                    uint is2or3 = matCondi2.y | matCondi2.z;  //#2 或 #3 号渲染通道
+                    is2or3 = 0;         //TODO: 这里手动清除噪点  
                     R15 = is2or3 ? (frxxPow2 + R15) : R15;    //TODO: frxxPow2 + R15 -> T11.xyz 的具体含义 
+                    //test.xyz = R15;
 
                     //if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse -> 覆盖到 R15.xyz 
-                    if (true) //TODO DELETE 
+                    if ( false ) //TODO DELETE 
                     {
                         //使用 M_Inv_VP 的前3x3矩阵(去除仿射变换部分) 对处于NDC空间中的坐标(其中z轴固定为1)做变换
                         //所的结果可以认为是: 将摄像机到屏幕像素点的朝向(Direction)通过矩阵逆变换，转换到世界空间中
@@ -443,37 +445,40 @@ Shader "Kena/KenaGI"
                         R15.xyz = R10.xyz * half3(-_pi, -_pi, -_pi); //π * 基础环境光 -> 这里的π一般认为是着色点附近半球域光强度积分后的强度值  
                         //test.xyz = R15.xyz; 
                     }
-
-                    uint is8 = condi.x == uint(8);
+                    
+                    uint is8 = condi.x == uint(8); 
+                    is8 = 0; //TODO: 手动清除噪点 
                     R10.xyz = frxxPow2.xyz * frxx_condi.w + R15.xyz; 
                     R10.xyz = is8 ? R10.xyz : R15.xyz; 
-
+                    
                     //以下逻辑与之前处理 #6 渲染通道时雷同 
                     half4 biasN = half4(bias_N.xyz, 1.0); 
                     half3 bias_biasN = mul(M_CB1_181, biasN); 
                     half4 mixN = biasN.yzzx * biasN.xyzz; 
-                    half3 bias_mixN = mul(M_CB1_184, mixN);
+                    half3 bias_mixN = mul(M_CB1_184, mixN); 
                     //base_disturb * scale + bias 
                     ao_diffuse_common = V_CB1_187 * (biasN.x * biasN.x - biasN.y * biasN.y) + (bias_biasN + bias_mixN);
-                    ao_diffuse_common = V_CB1_180 * max(ao_diffuse_common, half3(0, 0, 0));
+                    ao_diffuse_common = V_CB1_180 * max(ao_diffuse_common, half3(0, 0, 0)); 
 
                     //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
                     ao_diffuse_common = AO_from_RN * AO_final * ao_diffuse_common + V_CB0_1 * (1 - AO_final);
 
                     R10.xyz = R10.xyz * ao_diffuse_common + ao_diffuse_from_6;  //这是个颜色, 推测为完整的 Diffuse 
-
+                    
                     half intense = dot(half3(0.3, 0.59, 0.11), R10.xyz);
-                    half check = 1.0 == 0;      //返回false -> 相当于关闭了alpha通道 -> cb1[200].z == 0 ?
+                    half check = 1.0 == 0;      //返回false -> 相当于关闭了alpha通道 -> cb1[200].z == 0 ? 
                     //光强度与flag求and -> 要求强度大于0且开启了flag 
                     //在前面的基础上还要求是 #9或#5号渲染通道 -> check 才为 true(1) 
                     output.w = half((uint(check) & uint(intense)) & is9or5);    //此处返回恒为 0 
 
                 }
-                else //对于 #0 号 渲染通道  
+                else //对于 #0 号 渲染通道 
                 {
-                    R10 = half4(0, 0, 0, 0);
+                    R10 = half4(0, 0, 0, 0); 
                     output.w = 0;
                 }
+
+                test.xyz = R10;
 
                 uint2 is0or7 = condi.xxx != uint2(0, 7).xy;
                 if ((is0or7.x & is0or7.y) != 0)  //既不是 #0号 也不是 #7 号渲染通道 
