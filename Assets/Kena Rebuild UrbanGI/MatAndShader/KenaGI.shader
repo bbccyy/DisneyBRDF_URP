@@ -313,7 +313,7 @@ Shader "Kena/KenaGI"
                 {
                     //依据是否是 #4号通道 -> 采样不同 diffuse (R12相对于R10在人物区域相对更加暗沉一些) 
                     //GI_Diffuse - GI_Diffuse * factor_RoughOrZero -> 调低了人物和茅屋顶的亮度 
-                    half3 R15 = matCondi.z ? (R12 - R12 * factor_RoughOrZero) : (R10 - R10 * factor_RoughOrZero); 
+                    half3 R15 = matCondi.z ? (R12.xyz - R12.xyz * factor_RoughOrZero) : (R10.xyz - R10.xyz * factor_RoughOrZero);
 
                     //RN 是归一化后的 d_norm -> RebuiltedNorm (或RN) 
                     half RN_Len = sqrt(dot(d_norm, d_norm));  //前面以及提及，RN_Len正比于物体表面的平坦程度 
@@ -366,15 +366,18 @@ Shader "Kena/KenaGI"
                     if (true) //TODO DELETE 
                     {
                         //使用 M_Inv_VP 的前3x3矩阵(去除仿射变换部分) 对处于NDC空间中的坐标(其中z轴固定为1)做变换
-                        //所的结果可以认为是: 将摄像机到屏幕像素点的朝向(Direction)通过矩阵逆变换，转换到世界空间中 
+                        //所的结果可以认为是: 将摄像机到屏幕像素点的朝向(Direction)通过矩阵逆变换，转换到世界空间中
+                        //TODO -> 优化时可精简 
                         half3 camToPixelDirRaw2 = V_CB1_48.xyz * coord.xxx;
                         camToPixelDirRaw2       = V_CB1_49.xyz * coord.yyy      + camToPixelDirRaw2;
                         camToPixelDirRaw2       = V_CB1_50.xyz * half3(1, 1, 1) + camToPixelDirRaw2;
                         half3 camToPxlDir2 = normalize(camToPixelDirRaw2);
-                        half3 viewDir2 = -camToPxlDir2; 
+                        half3 viewDir2 = -camToPxlDir2;
                         //test.xyz = abs(viewDir - viewDir2);  //验证上述代码求解出的 viewDir 与 之前通过像素点世界坐标与摄像机坐标求解出的 viewDir 是一致的 
 
-                        half3 viewTangentRaw = NoV * (-norm) + viewDir;  //viewTangentRaw(vt) 
+                        //待考证: 下面公式的最后加法部分如果使用 camToPxlDir2 替代 viewDir2 -> 所得向量接近光线折射方向 
+                        //这样后续的许多计算将会看起来更加有"意义" 
+                        half3 viewTangentRaw = dot(viewDir2, norm) * (-norm) + viewDir2;  //viewTangentRaw(vt) 
                         half3 viewTangent = normalize(viewTangentRaw); 
                         bias_N = viewTangent;    //注: 该分支需要改写了bias_N的取值，bias_N后续会继续参与运算 
 
@@ -385,49 +388,41 @@ Shader "Kena/KenaGI"
                         //test = ToN.xxxx * 1000; //作为验证，可以开启这段代码(需确保总是进入当前分支) 
                         half ang_NoV = acos(NoV); //我们知道NoV=1代表V和N同向(俯视) -> ang_NoV = acos(1) = 0，既俯视时偏暗；反之掠视时偏亮(最大得pi/2) 
                         //test = ang_NoV.xxxx / (_pi); //验证用 
-                        half ang_ToN = acos(ToN); //应该恒为 pi/2 
+                        half ang_ToN = acos(ToN); //应该恒为 pi/2  -> TODO: 优化时可精简 
                         //test = ang_ToN.xxxx / (_pi/2) * 0.5; //作为验证，使用renderdoc截取此输出，经过像素检测可知各处等于 0.5 -> 符合acos(0) = pi/2 的结果 
 
                         half cos_half_angle_TtoV = cos(abs(ang_NoV - ang_ToN) * 0.5); //俯视时为cos(π/4)=sqrt(2)/2，掠视时为cos(0)=1 
                         //test = cos_half_angle_TtoV.xxxx; //使用renderoc截帧查看俯视角度像素 -> 最小值在0.75附近 -> 符合预估的sqrt(2)/2 
 
-                        half3 V_hori = norm * (-ToN) + viewTangent; //获得朝向折射方向的 "水平向量" -> Vector_Horizontal 
-                        //test.xyz = V_hori;
-                        //test.xyz = viewTangent;
+                        half3 dir_A = norm * (-ToN) + viewTangent; //鉴于ToN恒为0，返回值恒为 viewTangent，这里用dir_A表示以示区别 
+                        //test.xyz = abs(dir_A - viewTangent); 
 
-                        half RefrawDotHori = dot(V_hori, viewTangentRaw);
-                        tmp1 = dot(V_hori, V_hori) * dot(viewTangentRaw, viewTangentRaw) + 0.0001;
-                        tmp1 = RefrawDotHori* (1.0 / sqrt(tmp1)); //相当于求 |V_hori| * |RefracRaw|的倒数  
-                        tmp1 = RefrawDotHori* tmp1; // AdotB/(|A|*|B|) -> cos<AB> -> cos(V_hori和Refract的夹角) 
-                        //以下可以看做是对cosθ的两种不同range调整  
-                        half2 cos_VhroiToRefract_adjust2 = half2(0.5, 17.0) * tmp1 + half2(0.5, -16.780001); 
-                        cos_VhroiToRefract_adjust2.x = saturate(cos_VhroiToRefract_adjust2.x); 
-                        tmp1 = sqrt(cos_VhroiToRefract_adjust2.x);
+                        half AoTraw = dot(dir_A, viewTangentRaw);
+                        tmp1 = sqrt(dot(dir_A, dir_A) * dot(viewTangentRaw, viewTangentRaw) + 0.0001); //相当于求 |dir_A| * |viewTangentRaw|
+                        half cos_AtoT = AoTraw * (1.0 / tmp1); //相当于求 dir_A 和 viewTangentRaw夹角的余弦值 -> cos(AtoT) = cos(0) = 1  
 
-                        half rough_factor_1 = rough_7 * rough_7; 
-                        half rough_factor_2 = rough_factor_1 * 2 + 0.2;
-                        rough_factor_1 = rough_factor_1 + 0.2;
+                        //以下可以看做是对cos值的 Scale 和 Transform 
+                        half2 cos_AtoT_ST = half2(0.5, 17.0) * cos_AtoT + half2(0.5, -16.780001); 
+                        cos_AtoT_ST.x = saturate(cos_AtoT_ST.x); 
+                        half sqrt_cosAtoTst = sqrt(cos_AtoT_ST.x); //该值目前看恒为 1 
 
-                        half sin_NV = sqrt(1 - NoV * NoV); 
-                        half factor_HroiToRefract = 0.997551 * tmp1;
-                        half factor_NoV = -0.069943 * NoV;
-                        half twist = factor_HroiToRefract* sin_NV + factor_NoV;  //似乎是对朝向的旋转 
+                        rough_7 = rough_7 * rough_7; 
+                        half rough_factor_1 = rough_7 + 0.2; 
+                        half rough_factor_2 = rough_7 * 2 + 0.2; 
 
-                        rough_factor_1 = tmp1* rough_factor_1; 
-                        tmp2 = half2(1.414214, 3.544908)* rough_factor_1; //数值->(sqrt(2), 2*sqrt(π)) 
+                        half sin_NaV = sqrt(1 - NoV * NoV); 
+                        half sin_NaV_ST = (0.997551 * sqrt_cosAtoTst) * sin_NaV + (-0.069943 * NoV);  //和cos_half_angle_TtoV表现的趋势一致，俯视时数值偏小，掠视时数值偏大 
 
-                        half R5Z = (NoV + ToN) - (-0.139886) * twist; //记为 R5Z 
-                        R5Z = -0.5 * R5Z * R5Z; 
-                        R5Z = R5Z / (tmp2.x* tmp2.x); 
-                        // exp(-0.5 * R5Z^2 / (2*cos_VhoR*(roughness^2+0.2)^2)) / (2sqrt(π)*sqrt(cos_VhoR)*(roughness^2 + 0.2)) 
-                        // 其中 R5Z = (NdotV + ToN)-(-0.139886)*(0.997*sqrt(cos_VhroiToRefract)*sinθ-0.069943*cosθ) 
-                        R5Z = exp(R5Z) / tmp2.y; 
-                        tmp1 = tmp1 * R5Z; // sqrt(cos_VhoR*0.5+0.5) * (上式) -> 记为 R5Z' 
+                        tmp2 = (sqrt_cosAtoTst * rough_factor_1) * half2(1.414214, 3.544908);     //常数对照 -> (sqrt(2), 2*sqrt(π)) 
+                        tmp1 = sqrt_cosAtoTst * exp(-0.5 * pow2((NoV + ToN) + 0.139886 * sin_NaV_ST) / pow2(tmp2.x)) / tmp2.y; //sqrt_cosAtoTst似乎可以和tmp2.y的构成元素互相约去 
+                        //下式pow5会导致返回值非常接近0，如果使用pow2则能保留俯视角度的高亮感 
+                        //soft_fresnel_intensity 输出的是一张数值整体接近0，但是在掠视方向被柔和提亮的强度图 
+                        half soft_fresnel_intensity = tmp1 * (0.953479 * pow5(1 - sqrt(saturate(ToV * 0.5 + 0.5))) + 0.046521);
+                        
+                        //R10.w主要来自纹理rifr.y通道，代表整体的GI_Intensity遮罩
+                        half gi_fresnel_soft_intensity = R10.w * soft_fresnel_intensity; 
 
-                        tmp1 = tmp1 * (0.953479 * pow5(1 - sqrt(saturate(ToV * 0.5 + 0.5))) + 0.046521);
-                        half R1Y = 0.5 * R10.w * tmp1;   //记为R1Y TODO: 给个名字? 
-
-                        half RoV_po = saturate(-ToV);
+                        half RoV_po = saturate(-ToV); 
                         half factor_RoV = 1 - RoV_po;   //当掠射或垂直时得0，当视线成45度角时得最大值0.3左右 
 
                         tmp1 = exp((-0.5 * pow2(NoV - 0.14)) / pow2(rough_factor_2)) / (rough_factor_2 * 2.506628); //2.506=sqrt(2π) 
@@ -435,10 +430,11 @@ Shader "Kena/KenaGI"
                         half R10W = 0.953479 * pow5(1 - 0.5 * cos_half_angle_TtoV) + 0.046521;  //颜色强度 or AO 关联值 
                         R10W = pow2(1 - R10W) * R10W; 
 
-                        half3 df_chan7 = exp(log(R10.xyz) * (0.8 / cos_half_angle_TtoV));  // #7 渲染通道使用的 df，经过了调整 
-                        df_chan7 = df_chan7* tmp1* exp(cos_VhroiToRefract_adjust2.y)* R10W + factor_RoV * R1Y; 
+                        half3 df_chan7 = pow(R10.xyz, 0.8/cos_half_angle_TtoV); //对R10漫反射颜色修正，俯视角下不变，掠视情况下提亮  
+                        df_chan7 = df_chan7* tmp1* exp(cos_AtoT_ST.y)* R10W + factor_RoV * gi_fresnel_soft_intensity;
+                        
 
-                        tmp1 = lerp(min(0.25 * (1 + dot(viewTangent, viewTangent)), 1.0), (1 - abs(ToN)), 0.33) * factor_RoughOrZero * 0.318310;
+                        tmp1 = lerp(min(0.25 * (1 + dot(dir_A, dir_A)), 1.0), (1 - abs(ToN)), 0.33) * factor_RoughOrZero * 0.318310;
                         
                         R10.xyz = sqrt(R10.xyz) * tmp1 + df_chan7; 
                         R10.xyz = min(-R10.xyz, half3(0, 0, 0)); //结合下面乘 -π -> 这一步作用是抹去负数 
