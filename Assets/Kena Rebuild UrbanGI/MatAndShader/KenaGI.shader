@@ -156,17 +156,19 @@ Shader "Kena/KenaGI"
                 //Start here 
                 half2 suv = IN.vertex.xy * screen_param.zw;     //screen uv 
                 half2 coord = (IN.vertex.xy * screen_param.zw - 0.5) * IN.vertex.w * 2.0;  //[-1, +1] 
+                //test = IN.vertex.wwww / 2; //使用Renderdoc截帧抓取输出颜色知 -> IN.vertex.w == 1.0 -> 符合正交投影中HClip.w的定义 
 
                 //Sample Depth
                 half d = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, suv); 
-                d = 1 / (d * 0.1);  // Clip.z, 对原始d*0.1推测是将长度单位从 cm -> m 
+                d = 1 / (d * 0.1);  // 这是之前透视摄像机记录的 HClip.z -> 数值上等于视空间z轴 
                 
                 //get h-clip space 
-                coord = coord * d; 
-                float4 hclip = float4(coord.xy, d, 1); 
+                half2 hclipXY = coord * d;  //这一步用于将DNC空间的平面，展开到齐次裁剪前的透视投影空间里 
+                float4 hclip = float4(hclipXY.xy, d, 1);  //严格说这不是hclip的表述 -> 最后一维应当是d而不是1 
+                                                          //使用1作为最后一维的量 -> 将float4(coord.xy, d, 1)视为在hclip中的一个点，参与矩阵变换 
 
                 //use matrix_Inv_VP to rebuild posWS 
-                float4 posWS = mul(M_Inv_VP, hclip);  //注意此时单位还是 "厘米" 
+                float4 posWS = mul(M_Inv_VP, hclip);  //注意UE4下，posWS的单位是 "厘米" 
 
                 //cameraToPixelDir (取反得viewDir: 从视点触发指向摄像机) 
                 half3 cameraToPixelDir = normalize(posWS.xyz - camPosWS); 
@@ -363,9 +365,14 @@ Shader "Kena/KenaGI"
                     //if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse -> 覆盖到 R15.xyz 
                     if (true) //TODO DELETE 
                     {
-                        //TODO -> 用 coord.xy 和 V_CB1_48 等，重构viewDir' 
-                        // ... 
-
+                        //使用 M_Inv_VP 的前3x3矩阵(去除仿射变换部分) 对处于NDC空间中的坐标(其中z轴固定为1)做变换
+                        //所的结果可以认为是: 将摄像机到屏幕像素点的朝向(Direction)通过矩阵逆变换，转换到世界空间中 
+                        half3 camToPixelDirRaw2 = V_CB1_48.xyz * coord.xxx;
+                        camToPixelDirRaw2       = V_CB1_49.xyz * coord.yyy      + camToPixelDirRaw2;
+                        camToPixelDirRaw2       = V_CB1_50.xyz * half3(1, 1, 1) + camToPixelDirRaw2;
+                        half3 camToPxlDir2 = normalize(camToPixelDirRaw2);
+                        half3 viewDir2 = -camToPxlDir2; 
+                        //test.xyz = abs(viewDir - viewDir2);  //验证上述代码求解出的 viewDir 与 之前通过像素点世界坐标与摄像机坐标求解出的 viewDir 是一致的 
 
                         half3 viewTangentRaw = NoV * (-norm) + viewDir;  //viewTangentRaw(vt) 
                         half3 viewTangent = normalize(viewTangentRaw); 
@@ -386,7 +393,7 @@ Shader "Kena/KenaGI"
 
                         half3 V_hori = norm * (-ToN) + viewTangent; //获得朝向折射方向的 "水平向量" -> Vector_Horizontal 
                         //test.xyz = V_hori;
-                        test.xyz = viewTangent;
+                        //test.xyz = viewTangent;
 
                         half RefrawDotHori = dot(V_hori, viewTangentRaw);
                         tmp1 = dot(V_hori, V_hori) * dot(viewTangentRaw, viewTangentRaw) + 0.0001;
