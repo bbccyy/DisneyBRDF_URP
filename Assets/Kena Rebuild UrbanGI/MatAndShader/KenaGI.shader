@@ -416,22 +416,22 @@ Shader "Kena/KenaGI"
                         tmp2 = (sqrt_cosAtoTst * rough_factor_1) * half2(1.414214, 3.544908);     //常数对照 -> (sqrt(2), 2*sqrt(π)) 
                         tmp1 = sqrt_cosAtoTst * exp(-0.5 * pow2((NoV + ToN) + 0.139886 * sin_NaV_ST) / pow2(tmp2.x)) / tmp2.y; //sqrt_cosAtoTst似乎可以和tmp2.y的构成元素互相约去 
                         //下式pow5会导致返回值非常接近0，如果使用pow2则能保留俯视角度的高亮感 
-                        //soft_fresnel_intensity 输出的是一张数值整体接近0，但是在掠视方向被柔和提亮的强度图 
-                        half soft_fresnel_intensity = tmp1 * (0.953479 * pow5(1 - sqrt(saturate(ToV * 0.5 + 0.5))) + 0.046521);
+                        //dark_fresnel_intensity 输出的是一张数值整体接近0，但是在掠视方向被柔和提亮的强度图 
+                        half dark_fresnel_intensity = tmp1 * (0.953479 * pow5(1 - sqrt(saturate(ToV * 0.5 + 0.5))) + 0.046521);
                         
                         //R10.w主要来自纹理rifr.y通道，代表整体的GI_Intensity遮罩
-                        half gi_fresnel_soft_intensity = R10.w * soft_fresnel_intensity; 
+                        half gi_fresnel_dark_intensity = R10.w * dark_fresnel_intensity;
 
-                        half RoV_po = saturate(-ToV); 
-                        half factor_RoV = 1 - RoV_po;   //当掠射或垂直时得0，当视线成45度角时得最大值0.3左右 
+                        half ToV_sat = saturate(-ToV);
+                        half factor_ToV = 1 - ToV_sat;   //一般而言这个值都是 1
 
-                        tmp1 = exp((-0.5 * pow2(NoV - 0.14)) / pow2(rough_factor_2)) / (rough_factor_2 * 2.506628); //2.506=sqrt(2π) 
+                        half bright_fresnel_intensity = exp((-0.5 * pow2((NoV + ToN) - 0.14)) / pow2(rough_factor_2)) / (rough_factor_2 * 2.506628); //2.506=sqrt(2π) 
 
-                        half R10W = 0.953479 * pow5(1 - 0.5 * cos_half_angle_TtoV) + 0.046521;  //颜色强度 or AO 关联值 
-                        R10W = pow2(1 - R10W) * R10W; 
+                        tmp1 = 0.953479 * pow5(1 - 0.5 * cos_half_angle_TtoV) + 0.046521; 
+                        half lambert_intensity = pow2(1 - tmp1) * tmp1; //注意这个强度遮罩与前面菲涅尔遮罩不同，属于俯视时强度值大的类型 
 
                         half3 df_chan7 = pow(R10.xyz, 0.8/cos_half_angle_TtoV); //对R10漫反射颜色修正，俯视角下不变，掠视情况下提亮  
-                        df_chan7 = df_chan7* tmp1* exp(cos_AtoT_ST.y)* R10W + factor_RoV * gi_fresnel_soft_intensity;
+                        df_chan7 = df_chan7 * bright_fresnel_intensity * exp(cos_AtoT_ST.y)* lambert_intensity + factor_ToV * gi_fresnel_dark_intensity;
                         
 
                         tmp1 = lerp(min(0.25 * (1 + dot(dir_A, dir_A)), 1.0), (1 - abs(ToN)), 0.33) * factor_RoughOrZero * 0.318310;
