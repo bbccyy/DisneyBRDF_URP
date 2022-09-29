@@ -432,14 +432,16 @@ Shader "Kena/KenaGI"
 
                         half3 df_chan7 = pow(R10.xyz, 0.8/cos_half_angle_TtoV); //对R10漫反射颜色修正，俯视角下不变，掠视情况下提亮  
                         df_chan7 = df_chan7 * bright_fresnel_intensity * exp(cos_AtoT_ST.y) * lambert_intensity + factor_ToV * 0.5 * gi_fresnel_dark_intensity; 
-                        //test.xyz = df_chan7; //检视节点结果 
+                        //test.xyz = df_chan7; //检视节点结果 -> 较暗的场景 + 较亮的人物 + 相对突出的皮肤和窗户颜色 
 
-                        tmp1 = lerp(min(0.25 * (1 + dot(dir_A, dir_A)), 1.0), (1 - abs(ToN)), 0.33) * factor_RoughOrZero * 0.318310;
-                        
-                        R10.xyz = sqrt(R10.xyz) * tmp1 + df_chan7; 
+                        //以下遮罩主要来自纹理 rifr.x -> 人物 + 茅草屋顶 
+                        half mask_RoughOrZero = lerp(min(0.25*(1 + dot(viewTangent, viewTangent)), 1.0), (1 - abs(ToN)), 0.33) * factor_RoughOrZero * 0.318310;
+
+                        //sqrt(R10.xyz) -> 提亮diffuse -> 之后再应用遮罩提取人物和屋顶(顺便压暗纹理) -> 最后追加df_chan7 
+                        R10.xyz = sqrt(R10.xyz) * mask_RoughOrZero + df_chan7; 
                         R10.xyz = min(-R10.xyz, half3(0, 0, 0)); //结合下面乘 -π -> 这一步作用是抹去负数 
-                        R15.xyz = R10.xyz * half3(-_pi, -_pi, -_pi); //π * (由折射夹角和粗糙度系数等换算出来的新df) -> 一种基础漫反射 
-                    
+                        R15.xyz = R10.xyz * half3(-_pi, -_pi, -_pi); //π * 基础环境光 -> 这里的π一般认为是着色点附近半球域光强度积分后的强度值  
+                        //test.xyz = R15.xyz; 
                     }
 
                     uint is8 = condi.x == uint(8);
