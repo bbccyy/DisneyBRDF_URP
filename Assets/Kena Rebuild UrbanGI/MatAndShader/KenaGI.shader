@@ -208,6 +208,7 @@ Shader "Kena/KenaGI"
 
                 //Sample Diffuse 
                 half4 df = SAMPLE_TEXTURE2D(_Diffuse, sampler_Diffuse, suv); 
+                test = df; 
 
                 //Diffuse_GI_base 
                 half base_intensity = rifr.y * 0.08;
@@ -216,7 +217,7 @@ Shader "Kena/KenaGI"
                 //可见粗糙度越高 -> 越接近采样获得的diffuse；粗糙度越低/或者是#9号通道 -> 颜色退化成某种自定义的强度值 
                 half4 df_base = half4( lerp(base_intensity.xxx, df.xyz, factor_RoughOrZero).xyz, 0 ); 
                 //test = df_base;  //可以看出 rifr.y 似乎是不同材质漫反射强度基础值，经过和diffuse贴图lerp后，腰带和茅屋顶部分拥有3个通道不同的强度分布，其余部分依旧类似 rifr.y 的分布 
-                test.xyz = df;
+                
                 //计算R10颜色 -> diffuse_base_col 
                 uint is9or5 = matCondi.x | matCondi.y; 
                 uint flag_r7z = 0;  // 0 < cb1[155].x ?  -> 注: 修改如下几个控制flag，会极大影响diffuse表现 
@@ -465,20 +466,19 @@ Shader "Kena/KenaGI"
 
                     R10.xyz = R10.xyz * ao_diffuse_common + ao_diffuse_from_6;  //这是个颜色, 推测为完整的 Diffuse 
                     
-                    half intense = dot(half3(0.3, 0.59, 0.11), R10.xyz);
+                    half intense = dot(half3(0.3, 0.59, 0.11), R10.xyz); 
                     half check = 1.0 == 0;      //返回false -> 相当于关闭了alpha通道 -> cb1[200].z == 0 ? 
-                    //光强度与flag求and -> 要求强度大于0且开启了flag 
-                    //在前面的基础上还要求是 #9或#5号渲染通道 -> check 才为 true(1) 
+                    //output.alpha 主要来自于从R10(gi_diffuse)颜色提取的光强度值 -> intense
+                    //除此之外还需要手动开启 check符号位 以及符合 #9或#5号渲染通道，不然alpha输出值为0 
                     output.w = half((uint(check) & uint(intense)) & is9or5);    //此处返回恒为 0 
-
                 }
                 else //对于 #0 号 渲染通道 
                 {
                     R10 = half4(0, 0, 0, 0); 
-                    output.w = 0;
+                    output.w = 0; 
                 }
 
-                test.xyz = R10;
+                //test.xyz = R10;
 
                 uint2 is0or7 = condi.xxx != uint2(0, 7).xy;
                 if ((is0or7.x & is0or7.y) != 0)  //既不是 #0号 也不是 #7 号渲染通道 
