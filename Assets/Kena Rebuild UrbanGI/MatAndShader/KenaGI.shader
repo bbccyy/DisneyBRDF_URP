@@ -208,7 +208,7 @@ Shader "Kena/KenaGI"
 
                 //Sample Diffuse 
                 half4 df = SAMPLE_TEXTURE2D(_Diffuse, sampler_Diffuse, suv); 
-                test = df; 
+                //test = df; 
 
                 //Diffuse_GI_base 
                 half base_intensity = rifr.y * 0.08;
@@ -230,7 +230,7 @@ Shader "Kena/KenaGI"
                 half4 R10 = half4(0, 0, 0, 0); 
                 R10.xyz = and_r7z_w ? chessMask.xxx : R8.xyz; 
                 R10.w = R11.w; 
-                R10 = is9or5 ? R10 : half4(df.xyz, rifr.y);  //部分人物+窗户等物件显示diffse,其他近似黑白噪点 
+                R10 = is9or5 ? R10 : half4(df.xyz, rifr.y);  //目前通过调整参数，让R10==df 
 
                 //计算优化后的 NoV 输出到 df_base.w 中 -> 不是Lambert(NoL)，也不是Phong(NoH)，应该和Fresnel或漫反射强度相关 
                 half NoV = dot(norm, viewDir);
@@ -263,7 +263,7 @@ Shader "Kena/KenaGI"
                 //frxx_condi.x * factor_RoughOrZero叠加后获得人物有值的遮罩 
                 //通过lerp，在人物区域用上式中计算出的R12颜色(相对更加暗沉一些)，其他区域用tmp_col颜色(相对亮一些) 
                 R12 = lerp(tmp_col, R12, frxx_condi.x * factor_RoughOrZero); 
-                
+
                 //采样AO
                 half ao = SAMPLE_TEXTURE2D(_AO, sampler_AO, suv); 
 
@@ -478,26 +478,31 @@ Shader "Kena/KenaGI"
                     output.w = 0; 
                 }
 
-                //test.xyz = R10;
+                //到此为止完成了 GI_Diffuse 
+                //test.xyz = R10; 
 
-                uint2 is0or7 = condi.xxx != uint2(0, 7).xy;
-                if ((is0or7.x & is0or7.y) != 0)  //既不是 #0号 也不是 #7 号渲染通道 
+                uint2 is0or7 = condi.xxx != uint2(0, 7).xy; 
+                //if ((is0or7.x & is0or7.y) != 0)  //既不是 #0号 也不是 #7 号渲染通道 
+                if (true)  //TODO DELETE 
                 {
                     //GI_Spec 计算部分在此 
                     half3 Specular_Final = half3(0, 0, 0);
                     half3 gi_spec_base = half3(0, 0, 0);
 
-                    //首先依据是否是9or5号渲染通道，选择R11(环境光底色*方块Mask.y) 或 环境光底色作为新的 df_base(基础环境光底色) 
-                    df_base.xyz = is9or5 ? R11.xyz : df_base.xyz;  
+                    //首先依据是否是9or5号渲染通道，选择R11=df_base(?*方块Mask.y) 或 df_base 
+                    df_base.xyz = is9or5 ? R11.xyz : df_base.xyz; 
+                    //如下tmp1数值普遍在0.5左右，人物的边缘轮廓附近数值更低0.4左右 
                     tmp1 = (frxx_condi.x * df_base.w + 1) * 0.08; //df_base.w是与rough和NoV有关的值，处于[-1,0]区间；frxx_condi.x作为遮罩用于屏蔽指定像素 
-                    R11.xyz = factor_RoughOrZero * (R12.xyz - tmp1.xxx) + tmp1.xxx; //R11颜色是基于R12颜色做的微调 
+                    R11.xyz = lerp(tmp1, R12, factor_RoughOrZero); //R11颜色是基于 R12(除人物略暗外其他接近df) 做的lerp  
                     df_base.xyz = matCondi.z ? R11.xyz : df_base.xyz;  //如果是 #4 渲染通道 设置 df_base 为 上面计算出来的R11颜色 
+                    
                     half3 VR = (NoV + NoV) * norm + cameraToPixelDir;  //View_Reflection -> VR:视线反射方向 
+                    
                     half roughSquare = rifr.w* rifr.w;
                     //下式对应函数图像 -> 可近似为开口朝向的二次曲线，过y轴正1，同时与x轴正负1相交 
                     half rate = (roughSquare + sqrt(1 - roughSquare)) * (1 - roughSquare);  //约 0.63 -> 某种rate系数 
                     half3 VR_lift = lerp(norm, VR, rate);  //暂且定义为‘上抬视反’(注:没有归一化) ，具体反射向量上抬角度受rough控制 -> 简言之越粗糙，反射视线越接近法线朝向 
-
+                    
                     //使用屏幕UV采样 T12 -> 这张纹理看起来对水晶,金属扣环等物体做了处理 -> 疑似关联 spec -> 从后续逻辑看(xyz分量)推测是对高光项的线性的附加补充量 
                     half4 spec_add_raw = SAMPLE_TEXTURE2D(_Spec, sampler_Spec, suv);
                     half spec_mask = 1 - spec_add_raw.w;  //后续会作用到基于环境光贴图的高光重建过程中，作为强度遮罩 
