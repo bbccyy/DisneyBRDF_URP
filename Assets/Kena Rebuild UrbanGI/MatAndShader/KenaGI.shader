@@ -508,15 +508,15 @@ Shader "Kena/KenaGI"
                     half spec_mask = 1 - spec_add_raw.w;  //后续会作用到基于环境光贴图的高光重建过程中，作为强度遮罩 
                     //如下可知 frxx_condi.x 非0既1 -> 当0时使用采样T12纹理的采样返回值(w分量会取反)；当1时xyz高光附加颜色分量置为0(而w通道被置为1) 
                     half4 spec_add = matCondi.z ? (frxx_condi.x * half4(-spec_add_raw.xyz, spec_add_raw.w) + half4(spec_add_raw.xyz, spec_mask)) : half4(spec_add_raw.xyz, spec_mask);
-
+                    
                     //如下输出的是被T12.w通道修正过的'AO噪声'高频部分系数 
-                    half mixed_ao = df.w * ao + NoV_sat; 
-                    half AOwthRoughNoise = df.w * ao + exp(log(mixed_ao) * roughSquare);
+                    half mixed_ao = df.w * ao + NoV_sat; //TexAO * Computered_AO(SSAO.r) + saturate(NdotV) -> mixed_AO
+                    half AOwthRoughNoise = df.w * ao + pow(mixed_ao, roughSquare);
                     AOwthRoughNoise = saturate(AOwthRoughNoise - 1);  //-> r0.y -> 只截取超过1的部分，这部分可以看做是AO叠加上Rough后的高频噪声 
                     half masked_AOwthRoughNoise = spec_add.w * AOwthRoughNoise; //推测为spec特殊底噪 
-
+                    
                     //以下逻辑用于计算索引 -> 最终用于获取IBL贴图 
-                    uint2 screenPixelXY = uint2(IN.vertex.xy);
+                    uint2 screenPixelXY = uint2(IN.vertex.xy); //<----------
                     uint logOfDepth = uint(max(log(d * 1 + 1) + 1, 0));  //大体上等于深度的对数 + 1 -> 剔除了太过接近的距离 
                     uint curbed_logOfDepth = min(logOfDepth, uint(0));   //似乎只能返回 0? -> 注:上下行涉及常数部分均来自cb3 
                     screenPixelXY = screenPixelXY >> 1;                  //相当于半屏幕像素索引 
