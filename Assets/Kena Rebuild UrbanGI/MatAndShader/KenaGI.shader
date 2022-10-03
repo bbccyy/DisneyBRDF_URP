@@ -516,8 +516,9 @@ Shader "Kena/KenaGI"
                     half masked_AOwthRoughNoise = spec_add.w * AOwthRoughNoise; //推测为spec特殊底噪 
                     
                     //以下逻辑用于计算索引 -> 最终用于获取IBL贴图 
-                    uint2 screenPixelXY = uint2(IN.vertex.xy); //<----------
-                    uint logOfDepth = uint(max(log(d * 1 + 1) + 1, 0));  //大体上等于深度的对数 + 1 -> 剔除了太过接近的距离 
+                    uint2 screenPixelXY = uint2(IN.vertex.xy); 
+                    uint logOfDepth = uint(max(log(d * 1 + 1) * 1, 0));  //剔除深度对数小于0的部分 -> 排除太过接近的距离 
+                    //test.xyz = logOfDepth/3;  //对于人物来说，其logOfDepth返回值等于2 
                     uint curbed_logOfDepth = min(logOfDepth, uint(0));   //似乎只能返回 0? -> 注:上下行涉及常数部分均来自cb3 
                     screenPixelXY = screenPixelXY >> 1;                  //相当于半屏幕像素索引 
                     //((距离对数因子 * 1 + 半屏幕像素索引.v) * 1 + 半屏幕像素索引.u + 1) * 2 
@@ -535,11 +536,12 @@ Shader "Kena/KenaGI"
                     {
                         half RN_raw_Len = sqrt(dot(d_norm, d_norm));
                         norm_shift_intensity = RN_raw_Len;
-                        //以下分支用于计算某种扰动强度 -> norm_shift_intensity? -> TODO 确定学界定义范畴 
+                        //以下分支用于计算某种扰动强度 -> norm_shift_intensity 
                         //计算过程中使用到了: |Rn_raw|, roughness, asin(dot(Rn,'上抬视反')/|Rn|) -> 推测为经验公式 
                         if (true) //cb1[189].x 用十六进制解码后得 0x00000001 -> true 
                         {
-                            if (is6) //处理 #6 渲染通道 
+                            //if (is6) //处理 #6 渲染通道 
+                            if(false)  //TODO DELETE 
                             {
                                 //以下准备中间计算量 
                                 half rough_chan6 = max(rifr.w, 0.1);
@@ -559,13 +561,14 @@ Shader "Kena/KenaGI"
                         half cb0_1_w_rate = 0;
                         norm_shift_intensity = lerp(norm_shift_intensity, 1.0, cb0_1_w_rate);
                         gi_spec_base = (1.0 - norm_shift_intensity) * V_CB0_1.xyz;
+                        //test.xyz = gi_spec_base;
                     }
                     else
                     {
                         gi_spec_base = half3(0, 0, 0); 
                         norm_shift_intensity = 1; 
                     }
-
+                    //<---------- 
                     half lod_lv = 6 - (1.0 - 1.2 * log(rifr.w));  //与粗糙度有关的采样LOD等级，魔法数字6来自cb0 
                     half threshold = masked_AOwthRoughNoise;
                     half3 ibl_spec_output = half3(0, 0, 0);  //这是如下for循环的主要输出 
