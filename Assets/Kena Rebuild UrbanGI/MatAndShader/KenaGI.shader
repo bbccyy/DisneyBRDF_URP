@@ -513,7 +513,8 @@ Shader "Kena/KenaGI"
                     half mixed_ao = df.w * ao + NoV_sat; //TexAO * Computered_AO(SSAO.r) + saturate(NdotV) -> mixed_AO
                     half AOwthRoughNoise = df.w * ao + pow(mixed_ao, roughSquare);
                     AOwthRoughNoise = saturate(AOwthRoughNoise - 1);  //-> r0.y -> 只截取超过1的部分，这部分可以看做是AO叠加上Rough后的高频噪声 
-                    half masked_AOwthRoughNoise = spec_add.w * AOwthRoughNoise; //推测为spec特殊底噪 
+                    //half masked_AOwthRoughNoise = spec_add.w * AOwthRoughNoise; //推测为spec特殊底噪 
+                    half masked_AOwthRoughNoise = 1 * AOwthRoughNoise; //TODO: 避免噪点，使用1替代spec_add.w
                     
                     //以下逻辑用于计算索引 -> 最终用于获取IBL贴图 
                     uint2 screenPixelXY = uint2(IN.vertex.xy); 
@@ -570,7 +571,7 @@ Shader "Kena/KenaGI"
                     }
                     //<---------- 
                     half lod_lv = 6 - (1.0 - 1.2 * log(rifr.w));  //与粗糙度有关的采样LOD等级，魔法数字6来自cb0 
-                    half threshold = masked_AOwthRoughNoise;
+                    half threshold = masked_AOwthRoughNoise; 
                     half3 ibl_spec_output = half3(0, 0, 0);  //这是如下for循环的主要输出 
                     //注意: ret_from_t3_buffer_1是使用‘屏幕像素’与‘距离对数’组合出索引 -> 再从 T3 buffer 中取得的映射值 
                     //该映射返回值的取值范围要么是 0, 要么 1 
@@ -587,9 +588,11 @@ Shader "Kena/KenaGI"
                         half3 v_PixelToProbe = posWS - cb4_12.xyz; 
                         half d_PixelToProbe_square = dot(v_PixelToProbe, v_PixelToProbe); 
                         half d_PixelToProbe = sqrt(d_PixelToProbe_square); 
-                        if (d_PixelToProbe < cb4_12.w)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
+                        //if (d_PixelToProbe < cb4_12.w)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
+                        if (true)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
                         {
-                            half d_rate = saturate(d_PixelToProbe / cb4_12.w); //距离占比  
+                            //half d_rate = saturate(d_PixelToProbe / cb4_12.w); //距离占比  
+                            half d_rate = saturate(d_PixelToProbe / 10000); //TODO: 修正距离 
                             half VRLoP2P = dot(VR_lift, v_PixelToProbe); 
                             //下式形式为: Scale * VR_lift + v_PixelToProbe - [200,0,0] 
                             half3 shifted_p2p_dir = (sqrt(pow2(VRLoP2P) - (d_PixelToProbe_square - pow2(cb4_12.w))) - VRLoP2P) * VR_lift + v_PixelToProbe - half3(200, 0, 0);
@@ -603,11 +606,13 @@ Shader "Kena/KenaGI"
                             ibl_spec_output = (cb4_353.x * ibl_raw.rgb) * rate_factor * threshold * norm_shift_intensity + ibl_spec_output; 
                             //更新 threshold -> masked_AOwthRoughNoise 
                             threshold = threshold * (1.0 - rate_factor * ibl_raw.a); 
+                            //test.xyz = ibl_spec_output; 
                         }
+                        
                     }
 
                     //以下分支用于采样天空盒颜色 
-                    if (true) 
+                    if (true)  //<----------- 
                     {
                         half sky_lod = 1.8154297 - (1.0 - 1.2 * log(rifr.w)) - 1;
                         half3 sky_raw = SAMPLE_TEXTURECUBE_LOD(_Sky, sampler_Sky, VR_lift, sky_lod).rgb;
