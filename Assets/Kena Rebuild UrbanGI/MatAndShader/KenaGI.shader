@@ -505,10 +505,10 @@ Shader "Kena/KenaGI"
                     
                     //使用屏幕UV采样 T12 -> 这张纹理看起来对水晶,金属扣环等物体做了处理 -> 疑似关联 spec -> 从后续逻辑看(xyz分量)推测是对高光项的线性的附加补充量 
                     half4 spec_add_raw = SAMPLE_TEXTURE2D(_Spec, sampler_Spec, suv);
-                    half spec_mask = 1 - spec_add_raw.w;  //后续会作用到基于环境光贴图的高光重建过程中，作为强度遮罩 
+                    half spec_mask = 1 - spec_add_raw.w;  //后续会作用到环境光第二高光波瓣强度的重建过程中 -> 强度遮罩 -> 此处恒为0 
                     //如下可知 frxx_condi.x 非0既1 -> 当0时使用采样T12纹理的采样返回值(w分量会取反)；当1时xyz高光附加颜色分量置为0(而w通道被置为1) 
                     half4 spec_add = matCondi.z ? (frxx_condi.x * half4(-spec_add_raw.xyz, spec_add_raw.w) + half4(spec_add_raw.xyz, spec_mask)) : half4(spec_add_raw.xyz, spec_mask);
-                    
+
                     //如下输出的是被T12.w通道修正过的'AO噪声'高频部分系数 
                     half mixed_ao = df.w * ao + NoV_sat; //TexAO * Computered_AO(SSAO.r) + saturate(NdotV) -> mixed_AO
                     half AOwthRoughNoise = df.w * ao + pow(mixed_ao, roughSquare);
@@ -588,14 +588,15 @@ Shader "Kena/KenaGI"
                         half3 v_PixelToProbe = posWS - cb4_12.xyz; 
                         half d_PixelToProbe_square = dot(v_PixelToProbe, v_PixelToProbe); 
                         half d_PixelToProbe = sqrt(d_PixelToProbe_square); 
-                        //if (d_PixelToProbe < cb4_12.w)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
-                        if (true)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
+                        //half probe_range = cb4_12.w;
+                        half probe_range = 10000;
+                        if (d_PixelToProbe < probe_range)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
+                        //if (true)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
                         {
-                            //half d_rate = saturate(d_PixelToProbe / cb4_12.w); //距离占比  
-                            half d_rate = saturate(d_PixelToProbe / 10000); //TODO: 修正距离 
+                            half d_rate = saturate(d_PixelToProbe / probe_range); //距离占比 
                             half VRLoP2P = dot(VR_lift, v_PixelToProbe); 
                             //下式形式为: Scale * VR_lift + v_PixelToProbe - [200,0,0] 
-                            half3 shifted_p2p_dir = (sqrt(pow2(VRLoP2P) - (d_PixelToProbe_square - pow2(cb4_12.w))) - VRLoP2P) * VR_lift + v_PixelToProbe - half3(200, 0, 0);
+                            half3 shifted_p2p_dir = (sqrt(pow2(VRLoP2P) - (d_PixelToProbe_square - pow2(probe_range))) - VRLoP2P) * VR_lift + v_PixelToProbe - half3(200, 0, 0);
                             tmp1 = max(2.5 * d_rate - 1.5, 0);  //如果 (像素到探针的距离 / 探针影响半径R) < 0.6 -> 上式一律返回 0 
                             half rate_factor = 1.0 - (3.0 - 2.0 * tmp1) * pow2(tmp1); //距离缩放因子 
                             //shifted_p2p_dir 是采样cubemap的方向指针 
@@ -606,24 +607,26 @@ Shader "Kena/KenaGI"
                             ibl_spec_output = (cb4_353.x * ibl_raw.rgb) * rate_factor * threshold * norm_shift_intensity + ibl_spec_output; 
                             //更新 threshold -> masked_AOwthRoughNoise 
                             threshold = threshold * (1.0 - rate_factor * ibl_raw.a); 
-                            //test.xyz = ibl_spec_output; 
+                            //test.xyz = ibl_spec_output;  
                         }
                         
                     }
 
                     //以下分支用于采样天空盒颜色 
-                    if (true)  //<----------- 
+                    if (true) 
                     {
                         half sky_lod = 1.8154297 - (1.0 - 1.2 * log(rifr.w)) - 1;
                         half3 sky_raw = SAMPLE_TEXTURECUBE_LOD(_Sky, sampler_Sky, VR_lift, sky_lod).rgb;
                         gi_spec_base = sky_raw * V_CB1_180 * norm_shift_intensity + gi_spec_base;
+                        //test.xyz = gi_spec_base;
                     }
 
                     half spec_AOwthRoughNoise = threshold;  //这里我给threshold重新命名，以免疑惑 
                     //下式用来构建 Lc -> 既 GI_Spec_Light_IN -> 或者按学界叫法: prefilter specular -> 原始数据采自预积分的环境光贴图IBL 
                     half3 prefilter_Specular = (ibl_spec_output + gi_spec_base * spec_AOwthRoughNoise) * 1.0 + spec_add;
-
-                    if (matCondi.z) //对 #4 号渲染通道来说，spec需要很多额外处理 
+                    
+                    //if (matCondi.z) //对 #4 号渲染通道来说，spec需要很多额外处理 
+                    if(true)  //TODO DELETE 
                     {
                         //完成第一组环境光高光 
                         half2 lut_uv_1 = half2(NoV_sat, rifr.w);//这是第一组lut_uv，rifr.w->对应粗糙度rough2 
@@ -636,10 +639,10 @@ Shader "Kena/KenaGI"
                         half2 lut_uv_2 = half2(NoV_sat, frxx_condi.y); //这是第二组lut_uv，frxx_condi.y->对应粗糙度rough3 
                         half2 lut_raw_2 = SAMPLE_TEXTURE2D(_LUT, sampler_LUT, lut_uv_2);
                         //第二个 GI_Spec 中的光照方程输出值，前面的frxx_condi.x可以理解为对某些像素的遮罩，不是预积分的Lc 
-                        half gi_spec_brdf_2 = frxx_condi.x * (0.4 * lut_raw_2.x + lut_raw_2.y); 
+                        half gi_spec_brdf_2 = frxx_condi.x * (0.04 * lut_raw_2.x + lut_raw_2.y); 
                         //gi_spec_2 推测是对部分存在第二高光波瓣的材质进行二次环境光高光渲染的结果 (期间需要扣除一次'曝光'过程中的额外部分) 
                         half3 gi_spec_2 = gi_spec_1 * (1 - gi_spec_brdf_2) + spec_add_raw.xyz * gi_spec_brdf_2; 
-
+                        
                         //spec_mask -> 来自高光贴图alpha通道被1减的结果 (代表了强度) 
                         //gi_spec_brdf_2 -> 本身是基于视角和法线计算出的光照强度分布(也是强度) 
                         //AOwthRoughNoise -> 则是光照强度遮罩 
@@ -680,10 +683,10 @@ Shader "Kena/KenaGI"
 
                         //以下通过使用view_reflection第二次采样IBL -> 计算 第二高光波瓣的强度 以及 第二高光颜色 
                         half lod_lv_spc2 = 6 - (1.0 - 1.2 * log(frxx_condi.y));  //与第二波瓣粗糙度(frxx.y)有关的采样LOD等级，魔法数字6来自cb0 
-                        half threshold_2 = spec_second_intensity; //第二高光波瓣的强度 
+                        half threshold_2 = spec_second_intensity; //第二高光波瓣的强度 -> 受spec_mask影响，此只恒为0 
                         half3 ibl_spec2_output = half3(0, 0, 0);  //第二高光颜色 
 
-                        [unroll] for (uint i = 0; i < ret_from_t3_buffer_1 && threshold_2 >= 0.001; i++)
+                        [unroll] for (uint i = 0; i < ret_from_t3_buffer_1 && threshold_2 >= 0.001; i++) //因为threshold_2的缘故，这里进不去 
                         {
                             //判断当前场景‘激活’的IBL探针，如果当前像素点能被某张IBL影响，则进入内部 if 分支执行逻辑 
                             uint tb4_idx = i + ret_from_t3_buffer_2;
@@ -693,12 +696,14 @@ Shader "Kena/KenaGI"
                             half3 v_PixelToProbe = posWS - cb4_12.xyz;  //r7.xyz
                             half d_PixelToProbe_square = dot(v_PixelToProbe, v_PixelToProbe); //像素到探针距离的平方 
                             half d_PixelToProbe = sqrt(d_PixelToProbe_square);      //像素到探针的距离 
-                            if (d_PixelToProbe < cb4_12.w)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
+                            //half probe_range_2 = cb4_12.w;
+                            half probe_range_2 = 10000;
+                            if (d_PixelToProbe < probe_range_2)  //测试当前像素所在世界坐标是否在目标Probe的作用范围内 
                             {
-                                half d_rate = saturate(d_PixelToProbe / cb4_12.w); //距离占比  
+                                half d_rate = saturate(d_PixelToProbe / probe_range_2); //距离占比  
                                 half VRoP2P = dot(VR, v_PixelToProbe);  //注:第一次求spec时使用的是 VR_Lift 
                                 //下式形式为: Scale * VR + v_PixelToProbe - [200,0,0] 
-                                half3 shifted_p2p_dir_2 = (sqrt(pow2(VRoP2P) - (d_PixelToProbe_square - pow2(cb4_12.w))) - VRoP2P) * VR + v_PixelToProbe - half3(200, 0, 0);
+                                half3 shifted_p2p_dir_2 = (sqrt(pow2(VRoP2P) - (d_PixelToProbe_square - pow2(probe_range_2))) - VRoP2P) * VR + v_PixelToProbe - half3(200, 0, 0);
                                 
                                 tmp1 = max(2.5 * d_rate - 1.5, 0);  //如果 (像素到探针的距离 / 探针影响半径R) < 0.6 -> 上式一律返回 0 
                                 half rate_factor = 1.0 - (3.0 - 2.0 * tmp1) * pow2(tmp1); //距离缩放因子 
@@ -722,13 +727,15 @@ Shader "Kena/KenaGI"
                         }
                         
                         half spec_second_intensity_final = threshold_2; //重新命名下，以免糊涂 
-                        half3 ibl_scale_3chan = half3(1, 1, 1);  //用于替代 cb1_156_xyz 中的数据 -> 缩放 ibl_spec2 
-                        half3 scale_second_spec = half3(1, 1, 1);          //用于替代 cb1_134_yyy 中的数据 -> 缩放 第二高光的总和 
+                        half3 ibl_scale_3chan = half3(1, 1, 1);         //用于替代 cb1_156_xyz 中的数据 -> 缩放 ibl_spec2 
+                        half3 scale_second_spec = half3(1, 1, 1);       //用于替代 cb1_134_yyy 中的数据 -> 缩放 第二高光的总和 
                         
                         //ibl_spec2_output * ibl_scale_3chan -> 主要来自‘IBL贴图颜色’与‘第二高光强度’的混合 -> 代表了 GI_Spec_second_Mirror 
                         //gi_spec_second_base * spec_second_intensity_final -> 主要来自‘阳光颜色’与‘第二高光强度’的混合 -> 代表了 GI_Spec_second_Diffuse 
                         //gi_spec_2 -> 是经过调整的第一高光颜色 
                         Specular_Final = (ibl_spec2_output * ibl_scale_3chan + gi_spec_second_base * spec_second_intensity_final)* scale_second_spec + gi_spec_2; 
+
+                        //test.xyz = Specular_Final;
                     }
                     else  //不是 #4，也不是 #0 和 #7 的所有其他渲染通道 
                     {
@@ -742,6 +749,7 @@ Shader "Kena/KenaGI"
 
                     Specular_Final = min(-Specular_Final, half3(0, 0, 0)); 
                     output.xyz = -Specular_Final + R10.xyz;
+                    //test.xyz = output.xyz; 
                 }
                 else
                 {
@@ -749,8 +757,9 @@ Shader "Kena/KenaGI"
                     //对于没有高光的部分 -> 直接返回R10颜色 -> R10颜色可以认为是 GI_Diffuse_Final 
                     output.xyz = R10.xyz; 
                 }
-                //TODO test
-                return half4((test).xyz * 1, 1);
+                
+                return half4((test).xyz, output.w); //for test only 
+                //return half4((output).xyz, output.w); 
             }
             ENDHLSL
         }
