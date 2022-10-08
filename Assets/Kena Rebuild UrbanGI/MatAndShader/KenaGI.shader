@@ -126,13 +126,11 @@ Shader "Kena/KenaGI"
             static float4 cb4_12 = float4(-55666.63672, 27997.91406, -6577.694336, 1296.551636);
             static float4 cb4_353 = float4(1, 13, 0, 0);
 
-
-
             v2f vert (appdata IN)
             {
                 v2f OUT;
                 UNITY_SETUP_INSTANCE_ID(IN);
-                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(OUT);
+                //UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(OUT);
                 OUT.vertex = TransformObjectToHClip(IN.vertex);
                 OUT.uv = IN.uv;
 
@@ -141,9 +139,9 @@ Shader "Kena/KenaGI"
 
             half4 frag (v2f IN) : SV_Target
             {
-                half4 test = half4(0, 0, 0, 0);  //JUST FOR SHOW-RESULTS 
+                half4 test = half4(0, 0, 0, 0);  //JUST FOR SHOW CASE 
 
-                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(IN);
+                //UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(IN);
 
                 //最终输出值
                 half4 output = half4(0, 0, 0, 0);
@@ -235,12 +233,13 @@ Shader "Kena/KenaGI"
                 //计算优化后的 NoV 输出到 df_base.w 中 -> 不是Lambert(NoL)，也不是Phong(NoH)，应该和Fresnel或漫反射强度相关 
                 half NoV = dot(norm, viewDir);
                 half NoV_sat = saturate(NoV);
-                half a = (NoV_sat * 0.5 + 0.5) * NoV_sat - 1.0; //大体上在[-1, 0]区间上成二次弧线分布，N和V垂直得-1 
+                half a = (NoV_sat * 0.5 + 0.5) * NoV_sat - 1.0; //大体上在[-1, 0]区间上成二次曲线分布，N和V垂直得-1 
                 half b = saturate(1.25 - 1.25 * rifr.w); //与纹理.rough2成反比，且整体调整了偏移和缩放 
                 df_base.w = a * b; //这张输出图对比 NoV 来说，区间在[-1, 0]，且物体边缘数值绝对值大，中间值接近0 
                 //上面的数值转换到 [0, 1] 区间，经过粗糙度处理，整体类似提亮后的NoV 
                 half NoV_nearOne = df_base.w + 1.0;  //该值具有边缘暗中间亮的效果 -> 与下式中(1 - frxx_condi.x * fresnel)算子作用相似 
-
+                //NoV_nearOne 相比于 NoV_sat 色调差异小，明暗过渡柔和  
+                
                 //计算R12颜色 -> 按照视角的大小，表现出由暗到明的过渡(边缘暗中间亮) 
                 //另外，(col^2 - col)*t + col -> 这种模式的颜色操作等效于对原始颜色进行 "非线性提亮" 
                 half3 R12 = R10.xyz * 1.111111; 
@@ -258,6 +257,7 @@ Shader "Kena/KenaGI"
                 //NoV_nearOne算子与(1 - frxx_condi.x * fresnel)功能相似 
                 //R12颜色可以认为是基于R10(环境光基础色)进行边缘压暗(中间相对提亮)操作后的结果，与上式tmp_col比更加暗沉
                 //注意R12 = R10 * (一次NoV压暗) * (第二次NoV压暗) 
+                
                 R12 = 0.9 * NoV_nearOne * R12; 
                 //factor_RoughOrZero主要来自贴图rifr.x通道，只有人物和茅草屋顶有值 
                 //frxx_condi.x * factor_RoughOrZero叠加后获得人物有值的遮罩 
@@ -308,7 +308,7 @@ Shader "Kena/KenaGI"
                 //整体来说:当d>20000时scale恒为0; 当14000<d<20000时scale在[0,1]区间上线性分布; 当d<14000时scale横为1 
                 half scale = saturate((20000 - d) * 0.00016666666);      //Scale, 靠近摄像机->1，远离->0 
                 d_norm = lerp(norm, d_norm * g_depth_factor, scale);     //这张基于4邻域深度差扰动后的d_norm看起来与_GNorm很像(可能略微模糊了一点?) 
-
+                //test.xyz = d_norm;
                 //if (condi.x)  //对于 #1 ~ #15 号渲染通道来说都能进入 
                 if (true)       //这里修改原始定义，先让所有像素进入当前分支 -> 计算GI_Diffuse_Col 
                 {
