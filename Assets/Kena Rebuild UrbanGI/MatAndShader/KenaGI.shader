@@ -257,7 +257,7 @@ Shader "Kena/KenaGI"
                 //NoV_nearOne算子与(1 - frxx_condi.x * fresnel)功能相似 
                 //R12颜色可以认为是基于R10(环境光基础色)进行边缘压暗(中间相对提亮)操作后的结果，与上式tmp_col比更加暗沉
                 //注意R12 = R10 * (一次NoV压暗) * (第二次NoV压暗) 
-                
+ 
                 R12 = 0.9 * NoV_nearOne * R12; 
                 //factor_RoughOrZero主要来自贴图rifr.x通道，只有人物和茅草屋顶有值 
                 //frxx_condi.x * factor_RoughOrZero叠加后获得人物有值的遮罩 
@@ -327,7 +327,7 @@ Shader "Kena/KenaGI"
                     half RNoN = dot(RN, norm); //基于深度的法线 RN 与纹理法线 norm 之间的相似度 
                     half AO_from_RN = lerp(RNoN, 1, RN_Len);  //推测为AO -> 完全平坦时总是1，崎岖陡峭处返回RNoN -> 此时这个值也会很小  
 
-                    //计算 computed_ao
+                    //计算 computed_ao 
                     //备注1:log2_n = 1.442695 * ln_n 
                     //备注2:推测是经验公式(待考) -> 但是输出 computed_ao 可见对锐利边缘和暗部的检测效果很好 
                     half computed_ao = saturate(40.008 /(exp(-0.01*(RN_Len * 10.0 - 5))+1) - 19.504); 
@@ -456,10 +456,10 @@ Shader "Kena/KenaGI"
                     half4 biasN = half4(bias_N.xyz, 1.0); 
                     half3 bias_biasN = mul(M_CB1_181, biasN); 
                     half4 mixN = biasN.yzzx * biasN.xyzz; 
-                    half3 bias_mixN = mul(M_CB1_184, mixN); 
+                    half3 bias_mixN = mul(M_CB1_184, mixN);  //值域小于0，查看时使用 -bias_mixN 
                     //base_disturb * scale + bias 
                     ao_diffuse_common = V_CB1_187 * (biasN.x * biasN.x - biasN.y * biasN.y) + (bias_biasN + bias_mixN);
-                    ao_diffuse_common = V_CB1_180 * max(ao_diffuse_common, half3(0, 0, 0)); 
+                    ao_diffuse_common = V_CB1_180 * max(ao_diffuse_common, half3(0, 0, 0));   //经过V_CB1_180缩放后，返回值可能会大于1.0 
 
                     //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
                     ao_diffuse_common = AO_from_RN * AO_final * ao_diffuse_common + V_CB0_1 * (1 - AO_final);
