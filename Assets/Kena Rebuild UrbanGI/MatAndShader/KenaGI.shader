@@ -215,7 +215,7 @@ Shader "Kena/KenaGI"
                 //按照factor_RoughOrZero所代表的比例 -> 对漫反射颜色做lerp -> 从‘base_intensity’到‘贴图输出的固有色’进行调和 
                 //可见粗糙度越高 -> 越接近采样获得的diffuse；粗糙度越低/或者是#9号通道 -> 颜色退化成某种自定义的强度值 
                 half4 df_base = half4( lerp(base_intensity.xxx, df.xyz, factor_RoughOrZero).xyz, 0 ); 
-                //test = df_base;  //可以看出 rifr.y 似乎是不同材质漫反射强度基础值，经过和diffuse贴图lerp后，腰带和茅屋顶部分拥有3个通道不同的强度分布，其余部分依旧类似 rifr.y 的分布 
+                //test.xyz = df_base;  //可以看出 rifr.y 似乎是不同材质漫反射强度基础值，经过和diffuse贴图lerp后，腰带和茅屋顶部分拥有3个通道不同的强度分布，其余部分依旧类似 rifr.y 的分布 
                 
                 //计算R10颜色 -> diffuse_base_col 
                 uint is9or5 = matCondi.x | matCondi.y; 
@@ -506,19 +506,22 @@ Shader "Kena/KenaGI"
                     half rate = (roughSquare + sqrt(1 - roughSquare)) * (1 - roughSquare);  //约 0.63 -> 某种rate系数 
                     half3 VR_lift = lerp(norm, VR, rate);  //暂且定义为‘上抬视反’(注:没有归一化) ，具体反射向量上抬角度受rough控制 -> 简言之越粗糙，反射视线越接近法线朝向 
                     
-                    //使用屏幕UV采样 T12 -> 这张纹理看起来对水晶,金属扣环等物体做了处理 -> 疑似关联 spec -> 从后续逻辑看(xyz分量)推测是对高光项的线性的附加补充量 
+                    //使用屏幕UV采样 T12 -> 这张纹理看起来对水晶,金属扣环等物体做了处理 -> 疑似关联 spec
+                    //T12.xyz分量推测是对高光项的线性的附加补充量 
+                    //T12.w分量是高光项的强度 
                     half4 spec_add_raw = SAMPLE_TEXTURE2D(_Spec, sampler_Spec, suv);
                     half spec_mask = 1 - spec_add_raw.w;  //后续会作用到环境光第二高光波瓣强度的重建过程中 -> 强度遮罩 -> 此处恒为0 
-                    //如下可知 frxx_condi.x 非0既1 -> 当0时使用采样T12纹理的采样返回值(w分量会取反)；当1时xyz高光附加颜色分量置为0(而w通道被置为1) 
+                    //如下可知 frxx_condi.x 非0既1 -> 当0时使用采样T12纹理的采样返回值(w分量取1的互补数)；当1时xyz高光附加颜色分量置为0(而w通道被置为1) 
                     half4 spec_add = matCondi.z ? (frxx_condi.x * half4(-spec_add_raw.xyz, spec_add_raw.w) + half4(spec_add_raw.xyz, spec_mask)) : half4(spec_add_raw.xyz, spec_mask);
 
                     //如下输出的是被T12.w通道修正过的'AO噪声'高频部分系数 
                     half mixed_ao = df.w * ao + NoV_sat; //TexAO * Computered_AO(SSAO.r) + saturate(NdotV) -> mixed_AO
                     half AOwthRoughNoise = df.w * ao + pow(mixed_ao, roughSquare);
                     AOwthRoughNoise = saturate(AOwthRoughNoise - 1);  //-> r0.y -> 只截取超过1的部分，这部分可以看做是AO叠加上Rough后的高频噪声 
-                    //half masked_AOwthRoughNoise = spec_add.w * AOwthRoughNoise; //推测为spec特殊底噪 
-                    half masked_AOwthRoughNoise = 1 * AOwthRoughNoise; //TODO: 避免噪点，使用1替代spec_add.w
-                    
+                    //half spec_scaler = spec_add.w;    //spec_add.w是高光强度控制阀 
+                    half spec_scaler = 0.5;             //TODO: 避免噪点，使用0.5替代spec_add.w
+                    half spec_first_intensity = spec_scaler * AOwthRoughNoise;  
+
                     //以下逻辑用于计算索引 -> 最终用于获取IBL贴图 
                     uint2 screenPixelXY = uint2(IN.vertex.xy); 
                     uint logOfDepth = uint(max(log(d * 1 + 1) * 1, 0));  //剔除深度对数小于0的部分 -> 排除太过接近的距离 
@@ -574,12 +577,12 @@ Shader "Kena/KenaGI"
                     }
                     //<---------- 
                     half lod_lv = 6 - (1.0 - 1.2 * log(rifr.w));  //与粗糙度有关的采样LOD等级，魔法数字6来自cb0 
-                    half threshold = masked_AOwthRoughNoise; 
+                    half threshold = spec_first_intensity;
                     half3 ibl_spec_output = half3(0, 0, 0);  //这是如下for循环的主要输出 
                     //注意: ret_from_t3_buffer_1是使用‘屏幕像素’与‘距离对数’组合出索引 -> 再从 T3 buffer 中取得的映射值 
                     //该映射返回值的取值范围要么是 0, 要么 1 
                     //推测是依据距离远景和是否处于屏幕中心，判断是否要开启当前像素的环境光贴图采样逻辑 
-                    //此外 masked_AOwthRoughNoise 本身是后棋盘装mask和多重AO以及Rough计算出的"高频细节" 
+                    //此外 spec_first_intensity 本身是多重AO以及Rough计算得出  
                     //其作为循环判断之一也能阻止一部分像素进入IBL采样循环 
                     [unroll] for (uint i = 0; i < ret_from_t3_buffer_1 && threshold >= 0.001; i++)
                     {
@@ -608,7 +611,7 @@ Shader "Kena/KenaGI"
                             half4 ibl_raw = SAMPLE_TEXTURECUBE_LOD(_IBL, sampler_IBL, shifted_p2p_dir, lod_lv).rgba;
                             //更新 ibl_spec_output 
                             ibl_spec_output = (cb4_353.x * ibl_raw.rgb) * rate_factor * threshold * norm_shift_intensity + ibl_spec_output; 
-                            //更新 threshold -> masked_AOwthRoughNoise 
+                            //更新 threshold -> spec_first_intensity 
                             threshold = threshold * (1.0 - rate_factor * ibl_raw.a); 
                             //test.xyz = ibl_spec_output;  
                         }
@@ -624,9 +627,9 @@ Shader "Kena/KenaGI"
                         //test.xyz = gi_spec_base;
                     }
 
-                    half spec_AOwthRoughNoise = threshold;  //这里我给threshold重新命名，以免疑惑 
+                    spec_first_intensity = threshold;  //这里我给threshold重新命名，以免疑惑 
                     //下式用来构建 Lc -> 既 GI_Spec_Light_IN -> 或者按学界叫法: prefilter specular -> 原始数据采自预积分的环境光贴图IBL 
-                    half3 prefilter_Specular = (ibl_spec_output + gi_spec_base * spec_AOwthRoughNoise) * 1.0 + spec_add;
+                    half3 prefilter_Specular = (ibl_spec_output + gi_spec_base * spec_first_intensity) * 1.0 + spec_add;
                     
                     //if (matCondi.z) //对 #4 号渲染通道来说，spec需要很多额外处理 
                     if(true)  //TODO DELETE 
@@ -761,6 +764,7 @@ Shader "Kena/KenaGI"
                     output.xyz = R10.xyz; 
                 }
                 
+                //test = output;
                 return half4((test).xyz, output.w); //for test only 
                 //return half4((output).xyz, output.w); 
             }
