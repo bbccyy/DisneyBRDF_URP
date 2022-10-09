@@ -519,8 +519,8 @@ Shader "Kena/KenaGI"
                     half AOwthRoughNoise = df.w * ao + pow(mixed_ao, roughSquare);
                     AOwthRoughNoise = saturate(AOwthRoughNoise - 1);  //-> r0.y -> 只截取超过1的部分，这部分可以看做是AO叠加上Rough后的高频噪声 
                     //half spec_scaler = spec_add.w;    //spec_add.w是高光强度控制阀 
-                    half spec_scaler = 0.5;             //TODO: 避免噪点，使用0.5替代spec_add.w
-                    half spec_first_intensity = spec_scaler * AOwthRoughNoise;  
+                    half spec_scaler = 0.5;             //TODO: 避免噪点，使用0.5替代spec_add.w 
+                    half spec_first_intensity = spec_scaler * AOwthRoughNoise; 
 
                     //以下逻辑用于计算索引 -> 最终用于获取IBL贴图 
                     uint2 screenPixelXY = uint2(IN.vertex.xy); 
@@ -542,7 +542,8 @@ Shader "Kena/KenaGI"
                     if (true)  //这条分支又cb[0].x 控制，总是可以进入 
                     {
                         half RN_raw_Len = sqrt(dot(d_norm, d_norm));
-                        norm_shift_intensity = RN_raw_Len;
+                        norm_shift_intensity = RN_raw_Len;  //重建的norm是多个norm合成值，如果参与合成的norms方差较大，会分散合理，造成RN_raw_Len较小 
+                        //test = norm_shift_intensity;
                         //以下分支用于计算某种扰动强度 -> norm_shift_intensity 
                         //计算过程中使用到了: |Rn_raw|, roughness, asin(dot(Rn,'上抬视反')/|Rn|) -> 推测为经验公式 
                         if (true) //cb1[189].x 用十六进制解码后得 0x00000001 -> true 
