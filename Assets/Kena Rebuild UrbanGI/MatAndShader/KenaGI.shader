@@ -538,13 +538,12 @@ Shader "Kena/KenaGI"
                     uint ret_from_t3_buffer_2 = 1;  //r0.z -> 用于辅助定位IBL贴图在贴图队列中的位置 -> 可为[0,1,..7] 
 
                     uint is6 = condi.x == uint(6);  //是否是 #6 渲染通道 
-                    half norm_shift_intensity = 0;  //该参数和gi_spec_base是下面逻辑分支的主要计算目标 
+                    half smoothness = 0;  //该参数和gi_spec_base是下面逻辑分支的主要计算目标 
                     if (true)  //这条分支又cb[0].x 控制，总是可以进入 
                     {
                         half RN_raw_Len = sqrt(dot(d_norm, d_norm));
-                        norm_shift_intensity = RN_raw_Len;  //重建的norm是多个norm合成值，如果参与合成的norms方差较大，会分散合理，造成RN_raw_Len较小 
-                        //test = norm_shift_intensity;
-                        //以下分支用于计算某种扰动强度 -> norm_shift_intensity 
+                        smoothness = RN_raw_Len;  //重建的norm是多个norm合成值，如果参与合成的norms方差较大，会分散合理，造成RN_raw_Len较小 
+                        //test = smoothness;
                         //计算过程中使用到了: |Rn_raw|, roughness, asin(dot(Rn,'上抬视反')/|Rn|) -> 推测为经验公式 
                         if (true) //cb1[189].x 用十六进制解码后得 0x00000001 -> true 
                         {
@@ -563,18 +562,18 @@ Shader "Kena/KenaGI"
                                 tmp1 = saturate(tmp2.x / tmp2.y);
                                 tmp1 = ((1.0 - tmp1) * (-2.0) + 3.0) * pow2(1.0 - tmp1);
 
-                                norm_shift_intensity = saturate((_pi* RN_raw_Len - 0.1) * 5.0)* tmp1; //更新 norm_shift_intensity 
+                                smoothness = saturate((_pi* RN_raw_Len - 0.1) * 5.0)* tmp1; //更新 smoothness 
                             }
                         }
                         half cb0_1_w_rate = 0;
-                        norm_shift_intensity = lerp(norm_shift_intensity, 1.0, cb0_1_w_rate);
-                        gi_spec_base = (1.0 - norm_shift_intensity) * V_CB0_1.xyz;
+                        smoothness = lerp(smoothness, 1.0, cb0_1_w_rate);
+                        gi_spec_base = (1.0 - smoothness) * V_CB0_1.xyz;
                         //test.xyz = gi_spec_base;
                     }
                     else
                     {
                         gi_spec_base = half3(0, 0, 0); 
-                        norm_shift_intensity = 1; 
+                        smoothness = 1;
                     }
                     //<---------- 
                     half lod_lv = 6 - (1.0 - 1.2 * log(rifr.w));  //与粗糙度有关的采样LOD等级，魔法数字6来自cb0 
@@ -611,7 +610,7 @@ Shader "Kena/KenaGI"
                             //注意，由于没有以Cubemap_array形式导入原始资源，故如下采样的uv参数中没有第四维(array索引) 
                             half4 ibl_raw = SAMPLE_TEXTURECUBE_LOD(_IBL, sampler_IBL, shifted_p2p_dir, lod_lv).rgba;
                             //更新 ibl_spec_output 
-                            ibl_spec_output = (cb4_353.x * ibl_raw.rgb) * rate_factor * threshold * norm_shift_intensity + ibl_spec_output; 
+                            ibl_spec_output = (cb4_353.x * ibl_raw.rgb) * rate_factor * threshold * smoothness + ibl_spec_output;
                             //更新 threshold -> spec_first_intensity 
                             threshold = threshold * (1.0 - rate_factor * ibl_raw.a); 
                             //test.xyz = ibl_spec_output;  
@@ -624,7 +623,7 @@ Shader "Kena/KenaGI"
                     {
                         half sky_lod = 1.8154297 - (1.0 - 1.2 * log(rifr.w)) - 1;
                         half3 sky_raw = SAMPLE_TEXTURECUBE_LOD(_Sky, sampler_Sky, VR_lift, sky_lod).rgb;
-                        gi_spec_base = sky_raw * V_CB1_180 * norm_shift_intensity + gi_spec_base;
+                        gi_spec_base = sky_raw * V_CB1_180 * smoothness + gi_spec_base;
                         //test.xyz = gi_spec_base;
                     }
 
@@ -654,14 +653,14 @@ Shader "Kena/KenaGI"
                         //gi_spec_brdf_2 -> 本身是基于视角和法线计算出的光照强度分布(也是强度) 
                         //AOwthRoughNoise -> 则是光照强度遮罩 
                         half spec_second_intensity = spec_mask * gi_spec_brdf_2 * AOwthRoughNoise;  //该参数后面会影响第二高光的强度 
-                        half RN_shift_intensity = 0;                //带求的扰动强度 
+                        half smoothness_2 = 0;                //带求的扰动强度 
                         half3 gi_spec_second_base = half3(0, 0, 0);    //带求的第二波瓣颜色 
                         //下面的分支用于输出属于 #4 号通道专有的 gi_spec_second_base(既第二波瓣颜色) 
-                        //以及 RN_shift_intensity(基于RN的扰动强度) 
+                        //以及 smoothness_2 (基于RN扰动的强度) 
                         if (true)  //这条分支又cb[0].x 控制，总是可以进入 
                         {
                             half RN_raw_Len = sqrt(dot(d_norm, d_norm));
-                            RN_shift_intensity = RN_raw_Len;
+                            smoothness_2 = RN_raw_Len;
                             if (true) //cb1[189].x 用十六进制解码后得 0x00000001 -> true 
                             {
                                 //从frxx(T11)纹理中y通道提取rough数值,对没有数值的部分(木制件,茅草屋顶等部分)确保数值不低于0.1 
@@ -675,17 +674,17 @@ Shader "Kena/KenaGI"
                                 tmp1 = saturate(tmp2.x / tmp2.y);
                                 tmp1 = ((1.0 - tmp1) * (-2.0) + 3.0) * pow2(1.0 - tmp1);
 
-                                RN_shift_intensity = saturate((_pi * RN_raw_Len - 0.1) * 5.0) * tmp1; //更新 RN_shift_intensity
+                                smoothness_2 = saturate((_pi * RN_raw_Len - 0.1) * 5.0) * tmp1; //更新 smoothness_2
                             }
                             
                             half rn_shift_rate = 0; //定义在 cb0_1_w 的调节比率，恒为0
-                            RN_shift_intensity = lerp(RN_shift_intensity, 1.0, rn_shift_rate); 
-                            gi_spec_second_base = V_CB0_1.xyz * (1.0 - RN_shift_intensity); //第二高光波瓣的三通道颜色强度 
+                            smoothness_2 = lerp(smoothness_2, 1.0, rn_shift_rate);
+                            gi_spec_second_base = V_CB0_1.xyz * (1.0 - smoothness_2); //第二高光波瓣的三通道颜色强度 
                         }
                         else
                         {
                             gi_spec_second_base = half3(0, 0, 0);
-                            RN_shift_intensity = 1.0; 
+                            smoothness_2 = 1.0;
                         }
 
                         //以下通过使用view_reflection第二次采样IBL -> 计算 第二高光波瓣的强度 以及 第二高光颜色 
@@ -719,7 +718,7 @@ Shader "Kena/KenaGI"
                                 //注意，由于没有以Cubemap_array形式导入原始资源，故如下采样的uv参数中没有第四维(array索引) 
                                 half4 ibl_raw_2 = SAMPLE_TEXTURECUBE_LOD(_IBL, sampler_IBL, shifted_p2p_dir_2, lod_lv_spc2).rgba; 
                                 //更新 ibl_spec2_output -> cb4_353.x=1 
-                                ibl_spec2_output = (cb4_353.x * ibl_raw_2.rgb) * rate_factor * threshold_2 * RN_shift_intensity + ibl_spec2_output; 
+                                ibl_spec2_output = (cb4_353.x * ibl_raw_2.rgb) * rate_factor * threshold_2 * smoothness_2 + ibl_spec2_output;
                                 //更新 threshold_2 -> spec_second_intensity 
                                 threshold_2 = threshold_2 * (1.0 - rate_factor * ibl_raw_2.a); 
                             }
@@ -730,7 +729,7 @@ Shader "Kena/KenaGI"
                         {
                             half sky_lod_2 = 1.8154297 - (1.0 - 1.2 * log(frxx_condi.y)) - 1;
                             half3 sky_raw_2 = SAMPLE_TEXTURECUBE_LOD(_Sky, sampler_Sky, VR, sky_lod_2).rgb;
-                            gi_spec_second_base = sky_raw_2 * V_CB1_180 * RN_shift_intensity + gi_spec_second_base; //为gi_spec追加天空盒的贡献 
+                            gi_spec_second_base = sky_raw_2 * V_CB1_180 * smoothness_2 + gi_spec_second_base; //为gi_spec追加天空盒的贡献 
                         }
                         
                         half spec_second_intensity_final = threshold_2; //重新命名下，以免糊涂 
