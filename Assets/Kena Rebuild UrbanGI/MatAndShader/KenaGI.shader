@@ -149,6 +149,7 @@ Shader "Kena/KenaGI"
                 //辅助临时变量(存放计算中间量) 
                 half tmp1 = 0; 
                 half2 tmp2 = half2(0, 0);
+                half3 tmp3 = half3(0, 0, 0);
                 half3 tmp_col = half3(0, 0, 0);
 
                 //Start here 
@@ -343,9 +344,9 @@ Shader "Kena/KenaGI"
 
                     uint4 matCondi2 = condi.xxxx == uint4(6, 2, 3, 7).xyzw; 
                     half3 frxxPow2 = frxx_condi.xyz * frxx_condi.xyz;  //该变量作用推测是作为颜色遮罩 -> 只对人物+草叶生效(尤其是人物) 
-                    half3 ao_diffuse_from_6 = half3(0, 0, 0); 
-                    half3 ao_diffuse_common = half3(0, 0, 0);  //非 #6 号渲染通路也会在后面用类似如下的方法计算 common 变量 
-                    //if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_diffuse_from_6 
+                    half3 ao_scale_from_6 = half3(0, 0, 0);
+                    half3 ao_scale = half3(0, 0, 0);  //非 #6 号渲染通路也会在后面用类似如下的方法计算 common 变量 
+                    //if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_scale_from_6 
                     if(false) //TODO DELETE 
                     {
                         half4 neg_norm = half4(-norm.xyz, 1); 
@@ -353,11 +354,11 @@ Shader "Kena/KenaGI"
                         half3 rd_norm = norm.yzzx * norm.xyzz; 
                         half3 bias_neg_norm2 = mul(M_CB1_184, rd_norm);   //只对某个特定方向有响应，其余地方数值趋向于0 
                         //base_disturb * scale + bias 
-                        ao_diffuse_from_6 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2);
-                        ao_diffuse_from_6 = V_CB1_180 * max(ao_diffuse_from_6, half3(0, 0, 0)); 
+                        ao_scale_from_6 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2);
+                        ao_scale_from_6 = V_CB1_180 * max(ao_scale_from_6, half3(0, 0, 0));
 
                         //#6号渲染通路对应的 AO -> 使用了 frxxPow2 作为遮罩，只对人物(还有草叶等)生效 
-                        ao_diffuse_from_6 = AO_final * ao_diffuse_from_6 * frxxPow2; 
+                        ao_scale_from_6 = AO_final * ao_scale_from_6 * frxxPow2;
                     }
 
                     uint is2or3 = matCondi2.y | matCondi2.z;  //#2 或 #3 号渲染通道
@@ -380,7 +381,7 @@ Shader "Kena/KenaGI"
 
                         //待考证: 下面公式的最后加法部分如果使用 camToPxlDir2 替代 viewDir2 -> 所得向量接近光线折射方向 
                         //这样后续的许多计算将会看起来更加有"意义" 
-                        half3 viewTangentRaw = dot(viewDir2, norm) * (-norm) + viewDir2;  //viewTangentRaw(vt) 
+                        half3 viewTangentRaw = dot(viewDir2, norm) * (-norm) + camToPxlDir2;  //viewTangentRaw(vt) 
                         half3 viewTangent = normalize(viewTangentRaw); 
                         bias_N = viewTangent;    //注: 该分支需要改写了bias_N的取值，bias_N后续会继续参与运算 
 
@@ -425,11 +426,11 @@ Shader "Kena/KenaGI"
                         //R10.w主要来自纹理rifr.y通道，代表整体的GI_Intensity遮罩
                         half gi_fresnel_dark_intensity = R10.w * dark_fresnel_intensity;
 
-                        half ToV_sat = saturate(-ToV);
+                        half ToV_sat = saturate(-ToV);   //迷思: 如果是T和V点乘，返回值总是正，后续计算将会变得无意义；如果是折射角点乘V，则当前行的处理合理 
                         half factor_ToV = 1 - ToV_sat;   //一般而言这个值都是 1
 
                         half bright_fresnel_intensity = exp((-0.5 * pow2((NoV + ToN) - 0.14)) / pow2(rough_factor_2)) / (rough_factor_2 * 2.506628); //2.506=sqrt(2π) 
-
+                        
                         tmp1 = 0.953479 * pow5(1 - 0.5 * cos_half_angle_TtoV) + 0.046521; 
                         half lambert_intensity = pow2(1 - tmp1) * tmp1; //注意这个强度遮罩与前面菲涅尔遮罩不同，属于俯视时强度值大的类型 
 
@@ -443,8 +444,9 @@ Shader "Kena/KenaGI"
                         //sqrt(R10.xyz) -> 提亮diffuse -> 之后再应用遮罩提取人物和屋顶(顺便压暗纹理) -> 最后追加df_chan7 
                         R10.xyz = sqrt(R10.xyz) * mask_RoughOrZero + df_chan7; 
                         R10.xyz = min(-R10.xyz, half3(0, 0, 0)); //结合下面乘 -π -> 这一步作用是抹去负数 
-                        R15.xyz = R10.xyz * half3(-_pi, -_pi, -_pi); //π * 基础环境光 -> 这里的π一般认为是着色点附近半球域光强度积分后的强度值  
-                        //test.xyz = R15.xyz; 
+                        tmp3 = R10.xyz * half3(-_pi, -_pi, -_pi); //π * 基础环境光 -> 这里的π一般认为是着色点附近半球域光强度积分后的强度值  
+                        R15.xyz = tmp3;
+                        //test.xyz = R15;
                     }
                     
                     uint is8 = condi.x == uint(8); 
@@ -458,14 +460,15 @@ Shader "Kena/KenaGI"
                     half4 mixN = biasN.yzzx * biasN.xyzz; 
                     half3 bias_mixN = mul(M_CB1_184, mixN);  //值域小于0，查看时使用 -bias_mixN 
                     //base_disturb * scale + bias 
-                    ao_diffuse_common = V_CB1_187 * (biasN.x * biasN.x - biasN.y * biasN.y) + (bias_biasN + bias_mixN);
-                    ao_diffuse_common = V_CB1_180 * max(ao_diffuse_common, half3(0, 0, 0));   //经过V_CB1_180缩放后，返回值可能会大于1.0 
+                    ao_scale = V_CB1_187 * (biasN.x * biasN.x - biasN.y * biasN.y) + (bias_biasN + bias_mixN);
+                    ao_scale = V_CB1_180 * max(ao_scale, half3(0, 0, 0));   //经过V_CB1_180缩放后，返回值可能会大于1.0 
 
                     //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
-                    ao_diffuse_common = AO_from_RN * AO_final * ao_diffuse_common + V_CB0_1 * (1 - AO_final);
+                    ao_scale = AO_from_RN * AO_final * ao_scale + V_CB0_1 * (1 - AO_final);
 
-                    R10.xyz = R10.xyz * ao_diffuse_common + ao_diffuse_from_6;  //这是个颜色, 推测为完整的 Diffuse 
-                    
+                    R10.xyz = R10.xyz * ao_scale + ao_scale_from_6;  //这是个颜色, 推测为完整的 Diffuse 
+                    //test.xyz = R10.xyz;
+
                     half intense = dot(half3(0.3, 0.59, 0.11), R10.xyz); 
                     half check = 1.0 == 0;      //返回false -> 相当于关闭了alpha通道 -> cb1[200].z == 0 ? 
                     //output.alpha 主要来自于从R10(gi_diffuse)颜色提取的光强度值 -> intense
