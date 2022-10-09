@@ -538,7 +538,7 @@ Shader "Kena/KenaGI"
                     uint ret_from_t3_buffer_2 = 1;  //r0.z -> 用于辅助定位IBL贴图在贴图队列中的位置 -> 可为[0,1,..7] 
 
                     uint is6 = condi.x == uint(6);  //是否是 #6 渲染通道 
-                    half smoothness = 0;  //该参数和gi_spec_base是下面逻辑分支的主要计算目标 
+                    half smoothness = 0;            //该参数和gi_spec_base是下面逻辑分支的主要计算目标 
                     if (true)  //这条分支又cb[0].x 控制，总是可以进入 
                     {
                         half RN_raw_Len = sqrt(dot(d_norm, d_norm));
