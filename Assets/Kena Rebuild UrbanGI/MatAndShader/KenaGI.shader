@@ -235,17 +235,17 @@ Shader "Kena/KenaGI"
                 half NoV = dot(norm, viewDir);
                 half NoV_sat = saturate(NoV);
                 half a = (NoV_sat * 0.5 + 0.5) * NoV_sat - 1.0; //大体上在[-1, 0]区间上成二次曲线分布，N和V垂直得-1 
-                half b = saturate(1.25 - 1.25 * rifr.w); //与纹理.rough2成反比，且整体调整了偏移和缩放 
+                half b = saturate(1.25 - 1.25 * rifr.w); //与纹理.rough2成反比，且调整了偏移和缩放 
                 df_base.w = a * b; //这张输出图对比 NoV 来说，区间在[-1, 0]，且物体边缘数值绝对值大，中间值接近0 
                 //上面的数值转换到 [0, 1] 区间，经过粗糙度处理，整体类似提亮后的NoV 
                 half NoV_nearOne = df_base.w + 1.0;  //该值具有边缘暗中间亮的效果 -> 与下式中(1 - frxx_condi.x * fresnel)算子作用相似 
-                //NoV_nearOne 相比于 NoV_sat 色调差异小，明暗过渡柔和  
+                //NoV_nearOne 相比于 NoV_sat 色调差异小，明暗过渡柔和 
                 
                 //计算R12颜色 -> 按照视角的大小，表现出由暗到明的过渡(边缘暗中间亮) 
-                //另外，(col^2 - col)*t + col -> 这种模式的颜色操作等效于对原始颜色进行 "非线性提亮" 
+                //另外，col - (col^2 - col)*t -> 这种模式的颜色操作等效于对原始颜色进行 "非线性提亮" 
                 half3 R12 = R10.xyz * 1.111111; 
-                tmp_col = 0.85 * (NoV_sat - 1) * (1 - (R12 - 0.78*(R12 * R12 - R12))) + 1; 
-                R12 = R12 * tmp_col;    //将基于NoV的环境光强度 -> 作用到 R10 颜色上(边缘压暗，中间相对提亮) 
+                half3 NoV_soft = 0.85 * (NoV_sat - 1) * (1 - (R12 - 0.78 * (R12 * R12 - R12))) + 1; 
+                R12 = R12 * NoV_soft;    //将基于NoV的环境光强度 -> 作用到 R10 颜色上(边缘压暗，中间相对提亮) 
 
                 //施加Fresnel影响 
                 float p5 = pow5(1 - NoV_sat); 
@@ -253,13 +253,15 @@ Shader "Kena/KenaGI"
                 //Fresnel项的特色众所周知(边缘亮中间暗)；frxx_condi.x则是来自纹理的遮罩，只在人物+草叶等物件上有数值 
                 //frxx_condi.x * fresnel -> 对菲涅尔项添加遮罩，现在只有人物+草叶有Fresnel效果(数值大于0)
                 //(1 - frxx_condi.x * fresnel) -> 取反后被遮罩屏蔽的区域数值为 1；人物和草叶等变为反色(边缘暗中间亮) 
-                //R10颜色推测为GI_Diffuse_Col -> 乘以上述算子 -> 降低人物和草叶的边缘的亮度 
+                //R10颜色推测为GI_Diffuse_Col -> 乘以上述缩放因子 -> 降低人物和草叶的边缘的亮度 
                 tmp_col = R10.xyz * (1 - frxx_condi.x * fresnel);     //这里是将 Fresnel 项 -> 作用到 R10 颜色上 
-                //NoV_nearOne算子与(1 - frxx_condi.x * fresnel)功能相似 
-                //R12颜色可以认为是基于R10(环境光基础色)进行边缘压暗(中间相对提亮)操作后的结果，与上式tmp_col比更加暗沉
-                //注意R12 = R10 * (一次NoV压暗) * (第二次NoV压暗) 
- 
+                
+                //NoV_nearOne算子与(1 - frxx_condi.x * fresnel)功能相似 -> 边缘压暗(中间相对提亮)
+                //R12颜色可以认为是基于R10(环境光基础色)将边缘压暗后的结果，与上式tmp_col比更加暗沉,具体可参考下面的test输出 
+                //注意R12 = R10 * (一次NoV压暗:NoV_nearOne) * (第二次NoV压暗:NoV_soft) 
                 R12 = 0.9 * NoV_nearOne * R12; 
+                //test.xyz = tmp_col - R12;
+                
                 //factor_RoughOrZero主要来自贴图rifr.x通道，只有人物和茅草屋顶有值 
                 //frxx_condi.x * factor_RoughOrZero叠加后获得人物有值的遮罩 
                 //通过lerp，在人物区域用上式中计算出的R12颜色(相对更加暗沉一些)，其他区域用tmp_col颜色(相对亮一些) 
