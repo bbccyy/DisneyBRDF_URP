@@ -247,26 +247,26 @@ Shader "Kena/KenaGI"
                 half3 NoV_soft = 0.85 * (NoV_sat - 1) * (1 - (R12 - 0.78 * (R12 * R12 - R12))) + 1; 
                 R12 = R12 * NoV_soft;    //将基于NoV的环境光强度 -> 作用到 R10 颜色上(边缘压暗，中间相对提亮) 
 
-                //施加Fresnel影响 
+                //NoV_nearOne算子与下面的(1 - frxx_condi.x * fresnel)功能相似 -> 边缘压暗(中间相对提亮)
+                //R12颜色可以认为是基于R10(环境光基础色)将边缘压暗后的结果，与上式tmp_col比更加暗沉,具体可参考下面的test输出 
+                //注意R12 = R10 * (一次NoV压暗:NoV_nearOne) * (第二次NoV压暗:NoV_soft) 
+                R12 = 0.9 * NoV_nearOne * R12;
+
+                //借用Fresnel返回值与1的互补数，构造tmp_col，使之具有类似R12的修正效果，但相比略亮一些  
                 float p5 = pow5(1 - NoV_sat); 
                 float fresnel = lerp(p5, 1, 0.04);                    //略微修正(增大)fresnel 
                 //Fresnel项的特色众所周知(边缘亮中间暗)；frxx_condi.x则是来自纹理的遮罩，只在人物+草叶等物件上有数值 
-                //frxx_condi.x * fresnel -> 对菲涅尔项添加遮罩，现在只有人物+草叶有Fresnel效果(数值大于0)
+                //frxx_condi.x * fresnel -> 对菲涅尔项添加遮罩，现在只有人物+草叶有Fresnel效果(数值大于0) 
                 //(1 - frxx_condi.x * fresnel) -> 取反后被遮罩屏蔽的区域数值为 1；人物和草叶等变为反色(边缘暗中间亮) 
                 //R10颜色推测为GI_Diffuse_Col -> 乘以上述缩放因子 -> 降低人物和草叶的边缘的亮度 
                 tmp_col = R10.xyz * (1 - frxx_condi.x * fresnel);     //这里是将 Fresnel 项 -> 作用到 R10 颜色上 
-                
-                //NoV_nearOne算子与(1 - frxx_condi.x * fresnel)功能相似 -> 边缘压暗(中间相对提亮)
-                //R12颜色可以认为是基于R10(环境光基础色)将边缘压暗后的结果，与上式tmp_col比更加暗沉,具体可参考下面的test输出 
-                //注意R12 = R10 * (一次NoV压暗:NoV_nearOne) * (第二次NoV压暗:NoV_soft) 
-                R12 = 0.9 * NoV_nearOne * R12; 
-                //test.xyz = tmp_col - R12;
+                //test.xyz = tmp_col - R12; 
                 
                 //factor_RoughOrZero主要来自贴图rifr.x通道，只有人物和茅草屋顶有值 
                 //frxx_condi.x * factor_RoughOrZero叠加后获得人物有值的遮罩 
                 //通过lerp，在人物区域用上式中计算出的R12颜色(相对更加暗沉一些)，其他区域用tmp_col颜色(相对亮一些) 
                 R12 = lerp(tmp_col, R12, frxx_condi.x * factor_RoughOrZero); 
-
+                
                 //采样AO
                 half ao = SAMPLE_TEXTURE2D(_AO, sampler_AO, suv); 
 
@@ -301,7 +301,7 @@ Shader "Kena/KenaGI"
                 depth4 = 1.0 / (abs(depth4 - d) + 0.0001) * scr_pat;   //[田的4个方位与中心点距离差的倒数 (差异越大数值越小)] * [4个方位的不同衰减幅度] 
                 half g_depth_factor = 1.0 / dot(depth4, half4(1.0, 1.0, 1.0, 1.0));  //求和depth4的4个通道后取倒数 -> 作为求平均的乘子 
                 //以下类似矩阵运算的过程，本质是求取屏幕空间法线的一种计算方式 
-                //可以这样理解: depth4.xyzw代表了以当前像素点为中心周围4个方向的一种"梯度"，通过连续与对应方向的采样法线相乘和累加，相当于是依照梯度值大小，对4周法线的加权求和  
+                //可以这样理解: depth4.xyzw代表了以当前像素点为中心周围4个方向的一种"梯度"，通过连续与对应方向的采样法线相乘和累加，相当于是将梯度值大小视作权，对4周法线加权求和  
                 //最终结果 d_norm 应当兼具了法线走势，又具有较好连续性，且能够体现边缘处的变化 
                 //d_norm -> depth-based normal:基于深度和4领域插值的世界空间法向量 
                 //d_norm -> 还没归一化，其模长正比于物体表面的平坦程度: 既越平坦，模长越大 -> 主要归因于上式中 1/abs(depth4 - d) 部分 -> 越平坦数值越大 
@@ -544,7 +544,7 @@ Shader "Kena/KenaGI"
                     if (true)  //这条分支又cb[0].x 控制，总是可以进入 
                     {
                         half RN_raw_Len = sqrt(dot(d_norm, d_norm));
-                        smoothness = RN_raw_Len;  //重建的norm是多个norm合成值，如果参与合成的norms方差较大，会分散合理，造成RN_raw_Len较小 
+                        smoothness = RN_raw_Len;  //重建的norm是多个norm合成值，如果参与合成的norms方差较大，会分散合力，造成RN向量的模长较小 
                         //test = smoothness;
                         //计算过程中使用到了: |Rn_raw|, roughness, asin(dot(Rn,'上抬视反')/|Rn|) -> 推测为经验公式 
                         if (true) //cb1[189].x 用十六进制解码后得 0x00000001 -> true 
