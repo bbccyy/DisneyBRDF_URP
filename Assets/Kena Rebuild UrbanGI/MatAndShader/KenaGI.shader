@@ -348,7 +348,7 @@ Shader "Kena/KenaGI"
                     half3 frxxPow2 = frxx_condi.xyz * frxx_condi.xyz;  //该变量作用推测是作为颜色遮罩 -> 只对人物+草叶生效(尤其是人物) 
                     half3 ao_scale_from_6 = half3(0, 0, 0);
                     half3 ao_scale = half3(0, 0, 0);  //非 #6 号渲染通路也会在后面用类似如下的方法计算 common 变量 
-                    //if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 ao_scale_from_6 
+                    //if (matCondi2.x)  // #6 号渲染通路 使用如下公式计算 virtual_light_from_6 
                     if(false) //TODO DELETE 
                     {
                         half4 neg_norm = half4(-norm.xyz, 1); 
@@ -356,11 +356,11 @@ Shader "Kena/KenaGI"
                         half3 rd_norm = norm.yzzx * norm.xyzz; 
                         half3 bias_neg_norm2 = mul(M_CB1_184, rd_norm);   //只对某个特定方向有响应，其余地方数值趋向于0 
                         //base_disturb * scale + bias 
-                        ao_scale_from_6 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2);
-                        ao_scale_from_6 = V_CB1_180 * max(ao_scale_from_6, half3(0, 0, 0));
+                        half3 virtual_light_from_6 = V_CB1_187 * (norm.x*norm.x-norm.y*norm.y) + (bias_neg_norm1+bias_neg_norm2);
+                        virtual_light_from_6 = V_CB1_180 * max(virtual_light_from_6, half3(0, 0, 0));
 
                         //#6号渲染通路对应的 AO -> 使用了 frxxPow2 作为遮罩，只对人物(还有草叶等)生效 
-                        ao_scale_from_6 = AO_final * ao_scale_from_6 * frxxPow2;
+                        ao_scale_from_6 = AO_final * virtual_light_from_6 * frxxPow2;
                     }
 
                     uint is2or3 = matCondi2.y | matCondi2.z;  //#2 或 #3 号渲染通道
@@ -457,17 +457,18 @@ Shader "Kena/KenaGI"
                     R10.xyz = is8 ? R10.xyz : R15.xyz; 
                     
                     //以下逻辑与之前处理 #6 渲染通道时雷同 
-                    half4 biasN = half4(bias_N.xyz, 1.0); 
+                    //推测是计算 GI_Virtual_Directional_Light 的照射强度，因为计算结合依赖于表面法线的某几个维度 
+                    half4 biasN = half4(bias_N.xyz, 1.0);   //测试调整为bias_N.xzy 与 bias_N.xyz对比 
                     half3 bias_biasN = mul(M_CB1_181, biasN); 
                     half4 mixN = biasN.yzzx * biasN.xyzz; 
                     half3 bias_mixN = mul(M_CB1_184, mixN);  //值域小于0，查看时使用 -bias_mixN 
                     //base_disturb * scale + bias 
-                    ao_scale = V_CB1_187 * (biasN.x * biasN.x - biasN.y * biasN.y) + (bias_biasN + bias_mixN);
-                    ao_scale = V_CB1_180 * max(ao_scale, half3(0, 0, 0));   //经过V_CB1_180缩放后，返回值可能会大于1.0 
-
+                    half3 virtual_light = V_CB1_187 * (biasN.x * biasN.x - biasN.y * biasN.y) + (bias_biasN + bias_mixN);
+                    virtual_light = V_CB1_180 * max(virtual_light, half3(0, 0, 0));   //经过V_CB1_180缩放后，返回值可能会大于1.0 
+                    test.xyz = virtual_light * 0.5;
                     //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
-                    ao_scale = AO_from_RN * AO_final * ao_scale + V_CB0_1 * (1 - AO_final);
-
+                    ao_scale = AO_from_RN * AO_final * virtual_light + V_CB0_1 * (1 - AO_final);
+                    
                     R10.xyz = R10.xyz * ao_scale + ao_scale_from_6;  //这是个颜色, 推测为完整的 Diffuse 
                     //test.xyz = R10.xyz;
 
