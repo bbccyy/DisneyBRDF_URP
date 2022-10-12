@@ -209,13 +209,14 @@ Shader "Kena/KenaGI"
                 half4 df = SAMPLE_TEXTURE2D(_Diffuse, sampler_Diffuse, suv); 
                 //test = df; 
 
-                //Diffuse_GI_base 
-                half base_intensity = rifr.y * 0.08;
+                //F0 
+                half spec_base_intensity = rifr.y * 0.08;
                 half factor_RoughOrZero = matCondi.x ? 0 : rifr.x;  //#9号通道时粗糙度为0， 其余情况使用贴图输出的rifr.x值(粗糙度:rough1) 
-                //按照factor_RoughOrZero所代表的比例 -> 对漫反射颜色做lerp -> 从‘base_intensity’到‘贴图输出的固有色’进行调和 
-                //可见粗糙度越高 -> 越接近采样获得的diffuse；粗糙度越低/或者是#9号通道 -> 颜色退化成某种自定义的强度值 
-                half4 df_base = half4( lerp(base_intensity.xxx, df.xyz, factor_RoughOrZero).xyz, 0 ); 
-                //test.xyz = df_base;  //可以看出 rifr.y 似乎是不同材质漫反射强度基础值，经过和diffuse贴图lerp后，腰带和茅屋顶部分拥有3个通道不同的强度分布，其余部分依旧类似 rifr.y 的分布 
+                //对漫反射颜色做lerp -> 从‘spec_base_intensity’到 diffuse纹理所记载的F0值进行调和 
+                // 经过factor_RoughOrZero调和的结果既是材质F0值又是一张遮罩 
+                //另一方面roughness越大，F0越大，反之F0接近于0 
+                half4 F0 = half4( lerp(spec_base_intensity.xxx, df.xyz, factor_RoughOrZero).xyz, 0 ); //可以看出 F0 似乎是不同材质Spec强度基础值
+                //test.xyz = F0; 
                 
                 //计算R10颜色 -> diffuse_base_col 
                 uint is9or5 = matCondi.x | matCondi.y; 
@@ -224,21 +225,21 @@ Shader "Kena/KenaGI"
                 uint and_r7z_w = flag_r7z & flag_r7w; 
                 uint flag_ne_r7w = 0; // 0 != cb1[155].x ? 
                 half3 R8 = flag_ne_r7w ? half3(1, 1, 1) : df.xyz; 
-                //R11 -> 经过 或 没有经过 棋盘处理的 df_base 
-                half4 R11 = and_r7z_w ? half4(df_base.xyz, rifr.y) * chessMask.y : half4(df_base.xyz, rifr.y); 
+                //R11 -> 经过 或 没有经过 棋盘处理的 F0 
+                half4 R11 = and_r7z_w ? half4(F0.xyz, rifr.y) * chessMask.y : half4(F0.xyz, rifr.y);
                 half4 R10 = half4(0, 0, 0, 0); 
                 R10.xyz = and_r7z_w ? chessMask.xxx : R8.xyz; 
                 R10.w = R11.w; 
                 R10 = is9or5 ? R10 : half4(df.xyz, rifr.y);  //目前通过调整参数，让R10==df 
 
-                //计算优化后的 NoV 输出到 df_base.w 中 -> 不是Lambert(NoL)，也不是Phong(NoH)，应该和Fresnel或漫反射强度相关 
+                //计算优化后的 NoV 输出到 F0.w 中 -> 不是Lambert(NoL)，也不是Phong(NoH)，应该和Fresnel或漫反射强度相关 
                 half NoV = dot(norm, viewDir);
                 half NoV_sat = saturate(NoV);
                 half a = (NoV_sat * 0.5 + 0.5) * NoV_sat - 1.0; //大体上在[-1, 0]区间上成二次曲线分布，N和V垂直得-1 
                 half b = saturate(1.25 - 1.25 * rifr.w); //与纹理.rough2成反比，且调整了偏移和缩放 
-                df_base.w = a * b; //这张输出图对比 NoV 来说，区间在[-1, 0]，且物体边缘数值绝对值大，中间值接近0 
+                F0.w = a * b; //这张输出图对比 NoV 来说，区间在[-1, 0]，且物体边缘数值绝对值大，中间值接近0 
                 //上面的数值转换到 [0, 1] 区间，经过粗糙度处理，整体类似提亮后的NoV 
-                half NoV_nearOne = df_base.w + 1.0;  //该值具有边缘暗中间亮的效果 -> 与下式中(1 - frxx_condi.x * fresnel)算子作用相似 
+                half NoV_nearOne = F0.w + 1.0;  //该值具有边缘暗中间亮的效果
                 //NoV_nearOne 相比于 NoV_sat 色调差异小，明暗过渡柔和 
                 
                 //计算R12颜色 -> 按照视角的大小，表现出由暗到明的过渡(边缘暗中间亮) 
@@ -252,12 +253,12 @@ Shader "Kena/KenaGI"
                 //注意R12 = R10 * (一次NoV压暗:NoV_nearOne) * (第二次NoV压暗:NoV_soft) 
                 R12 = 0.9 * NoV_nearOne * R12;
 
-                //借用Fresnel返回值与1的互补数，构造tmp_col，使之具有类似R12的修正效果，但相比略亮一些  
+                //借用Fresnel返回值与1的互补数，构造tmp_col，使之具有类似R12的修正效果，但相比略亮一些 
                 float p5 = pow5(1 - NoV_sat); 
                 float fresnel = lerp(p5, 1, 0.04);                    //略微修正(增大)fresnel 
                 //Fresnel项的特色众所周知(边缘亮中间暗)；frxx_condi.x则是来自纹理的遮罩，只在人物+草叶等物件上有数值 
                 //frxx_condi.x * fresnel -> 对菲涅尔项添加遮罩，现在只有人物+草叶有Fresnel效果(数值大于0) 
-                //(1 - frxx_condi.x * fresnel) -> 取反后被遮罩屏蔽的区域数值为 1；人物和草叶等变为反色(边缘暗中间亮) 
+                //(1 - frxx_condi.x * fresnel) -> 取反后被遮罩屏蔽的区域数值为 1；人物和草叶等变为反色(边缘暗中间亮) -> 作用类似NoV 
                 //R10颜色推测为GI_Diffuse_Col -> 乘以上述缩放因子 -> 降低人物和草叶的边缘的亮度 
                 tmp_col = R10.xyz * (1 - frxx_condi.x * fresnel);     //这里是将 Fresnel 项 -> 作用到 R10 颜色上 
                 //test.xyz = tmp_col - R12; 
@@ -465,7 +466,7 @@ Shader "Kena/KenaGI"
                     //base_disturb * scale + bias 
                     half3 virtual_light = V_CB1_187 * (biasN.x * biasN.x - biasN.y * biasN.y) + (bias_biasN + bias_mixN);
                     virtual_light = V_CB1_180 * max(virtual_light, half3(0, 0, 0));   //经过V_CB1_180缩放后，返回值可能会大于1.0 
-                    test.xyz = virtual_light * 0.5;
+                    //test.xyz = virtual_light * 0.5;
                     //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
                     ao_scale = AO_from_RN * AO_final * virtual_light + V_CB0_1 * (1 - AO_final);
                     
@@ -495,12 +496,13 @@ Shader "Kena/KenaGI"
                     half3 Specular_Final = half3(0, 0, 0);
                     half3 gi_spec_base = half3(0, 0, 0);
 
-                    //首先依据是否是9or5号渲染通道，选择R11=df_base(?*方块Mask.y) 或 df_base 
-                    df_base.xyz = is9or5 ? R11.xyz : df_base.xyz; 
+                    //首先依据是否是9or5号渲染通道，选择R11=F0(?*方块Mask.y) 或 F0 
+                    F0.xyz = is9or5 ? R11.xyz : F0.xyz;
+                    
                     //如下tmp1数值普遍在0.5左右，人物的边缘轮廓附近数值更低0.4左右 
-                    tmp1 = (frxx_condi.x * df_base.w + 1) * 0.08; //df_base.w是与rough和NoV有关的值，处于[-1,0]区间；frxx_condi.x作为遮罩用于屏蔽指定像素 
+                    tmp1 = (frxx_condi.x * F0.w + 1) * 0.08; //F0.w是与rough和NoV有关的值，处于[-1,0]区间；frxx_condi.x作为遮罩用于屏蔽指定像素 
                     R11.xyz = lerp(tmp1, R12, factor_RoughOrZero); //R11颜色是基于 R12(除人物略暗外其他接近df) 做的lerp  
-                    df_base.xyz = matCondi.z ? R11.xyz : df_base.xyz;  //如果是 #4 渲染通道 设置 df_base 为 上面计算出来的R11颜色 
+                    F0.xyz = matCondi.z ? R11.xyz : F0.xyz;  //如果是 #4 渲染通道 设置 F0 为 上面计算出来的R11颜色 
                     
                     half3 VR = (NoV + NoV) * norm + cameraToPixelDir;  //View_Reflection -> VR:视线反射方向 
                     
@@ -509,7 +511,7 @@ Shader "Kena/KenaGI"
                     half rate = (roughSquare + sqrt(1 - roughSquare)) * (1 - roughSquare);  //约 0.63 -> 某种rate系数 
                     half3 VR_lift = lerp(norm, VR, rate);  //暂且定义为‘上抬视反’(注:没有归一化) ，具体反射向量上抬角度受rough控制 -> 简言之越粗糙，反射视线越接近法线朝向 
                     
-                    //使用屏幕UV采样 T12 -> 这张纹理看起来对水晶,金属扣环等物体做了处理 -> 疑似关联 spec
+                    //使用屏幕UV采样 T12 -> 这张纹理看起来对水晶,金属扣环等物体做了处理 -> 疑似关联 spec 
                     //T12.xyz分量推测是对高光项的线性的附加补充量 
                     //T12.w分量是高光项的强度 
                     half4 spec_add_raw = SAMPLE_TEXTURE2D(_Spec, sampler_Spec, suv);
@@ -639,11 +641,11 @@ Shader "Kena/KenaGI"
                     {
                         //完成第一组环境光高光 
                         half2 lut_uv_1 = half2(NoV_sat, rifr.w);//这是第一组lut_uv，rifr.w->对应粗糙度rough2 
-                        half2 lut_raw_1 = SAMPLE_TEXTURE2D(_LUT, sampler_LUT, lut_uv_1);
-                        half shifted_lut_bias = saturate(df_base.y * 50.0) * lut_raw_1.y * (1.0 - frxx_condi.x);
-                        half gi_spec_brdf_1 = df_base.xyz * lut_raw_1.x + shifted_lut_bias; //第一组 GI_Spec 中的预积分 brdf输出值  
+                        half2 lut_raw_1 = SAMPLE_TEXTURE2D(_LUT, sampler_LUT, lut_uv_1); 
+                        half shifted_lut_bias = saturate(F0.y * 50.0) * lut_raw_1.y * (1.0 - frxx_condi.x);
+                        half gi_spec_brdf_1 = F0.xyz * lut_raw_1.x + shifted_lut_bias; //第一组 GI_Spec 中的预积分 brdf输出值 
                         half3 gi_spec_1 = prefilter_Specular * gi_spec_brdf_1; //这是利用预积分技术重构出的 GI_Spec 
-
+                        
                         //完成第二组环境光高光(波瓣) 
                         half2 lut_uv_2 = half2(NoV_sat, frxx_condi.y); //这是第二组lut_uv，frxx_condi.y->对应粗糙度rough3 
                         half2 lut_raw_2 = SAMPLE_TEXTURE2D(_LUT, sampler_LUT, lut_uv_2);
@@ -750,14 +752,14 @@ Shader "Kena/KenaGI"
                     {
                         half2 lut_uv_1 = half2(NoV_sat, rifr.w);  //这是第一组lut_uv，rifr.w->对应粗糙度rough2 
                         half2 lut_raw_1 = SAMPLE_TEXTURE2D(_LUT, sampler_LUT, lut_uv_1); 
-                        half shifted_lut_bias = saturate(df_base.y * 50.0) * lut_raw_1.y; 
-                        half gi_spec_brdf_1 = df_base.xyz * lut_raw_1.x + shifted_lut_bias;  //第一组 GI_Spec 中的预积分 brdf输出值  
+                        half shifted_lut_bias = saturate(F0.y * 50.0) * lut_raw_1.y;
+                        half gi_spec_brdf_1 = F0.xyz * lut_raw_1.x + shifted_lut_bias;  //第一组 GI_Spec 中的预积分 brdf输出值  
                         half3 gi_spec_1 = prefilter_Specular * gi_spec_brdf_1; 
                         Specular_Final = gi_spec_1;
                     }
 
                     Specular_Final = min(-Specular_Final, half3(0, 0, 0)); 
-                    output.xyz = -Specular_Final + R10.xyz;
+                    output.xyz = -Specular_Final + R10.xyz; 
                     //test.xyz = output.xyz; 
                 }
                 else
