@@ -42,7 +42,7 @@ public class ReplaceRTPassFeature : ScriptableRendererFeature
             Blit(cmd, renderingData.cameraData.renderer.cameraColorTarget, renderingData.cameraData.renderer.cameraColorTarget);
             context.ExecuteCommandBuffer(cmd);
             cmd.Clear();
-            CommandBufferPool.Release(cmd);
+            CommandBufferPool.Release(cmd); 
         }
 
         // Cleanup any allocated resources that were created during the execution of this render pass.
@@ -59,7 +59,7 @@ public class ReplaceRTPassFeature : ScriptableRendererFeature
         m_ScriptablePass = new ReplaceRTPass();
 
         colRT = RenderTexture.GetTemporary(Camera.main.pixelWidth, Camera.main.pixelHeight, 0, RenderTextureFormat.ARGB64);
-        colRT.name = "main1 color buffer";
+        colRT.name = "main color buffer";
         colRT.filterMode = FilterMode.Point;
         depRT = RenderTexture.GetTemporary(Camera.main.pixelWidth, Camera.main.pixelHeight, 24, RenderTextureFormat.Depth);
         depRT.name = "main depth buffer";

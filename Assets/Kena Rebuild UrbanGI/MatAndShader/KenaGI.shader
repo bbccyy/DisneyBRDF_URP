@@ -191,7 +191,7 @@ Shader "Kena/KenaGI"
                 half2 chessMask = chessboard ? half2(1, 0) : half2(0, 1); 
 
                 //Sample _R_I_F_R 
-                half4 rifr = SAMPLE_TEXTURE2D(_R_I_F_R, sampler_R_I_F_R, suv); 
+                half4 rifr = SAMPLE_TEXTURE2D(_R_I_F_R, sampler_R_I_F_R, suv);   
                 uint flag = (uint)round(rifr.z * 255.0);
                 uint2 condi = flag & uint2(15, 16);//condi.x控制像素渲染逻辑(颜色表现丰富则噪点密集，表现单一则成块同色), y控制颜色混合;  
                 /* 对condi的计算等效如下代码: 
@@ -769,7 +769,7 @@ Shader "Kena/KenaGI"
                     output.xyz = R10.xyz; 
                 }
                 
-                //test = output;
+                test = output;
                 return half4((test).xyz, output.w); //for test only 
                 //return half4((output).xyz, output.w); 
             }
