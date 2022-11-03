@@ -195,7 +195,7 @@ Shader "Kena/KenaGI"
                 uint flag = (uint)round(rifr.z * 255.0);
                 uint2 condi = flag & uint2(15, 16);//condi.x控制像素渲染逻辑(颜色表现丰富则噪点密集，表现单一则成块同色), y控制颜色混合;  
                 /* 对condi的计算等效如下代码: 
-                uint2 condi = uint2(flag & 0x0000000F, flag & 0x00000010); */   
+                uint2 condi = uint2(flag & 0x0000000F, flag & 0x00000010); */ 
 
                 //Sample _F_R_X_X
                 float4 frxx = SAMPLE_TEXTURE2D(_F_R_X_X, sampler_F_R_X_X, suv);
