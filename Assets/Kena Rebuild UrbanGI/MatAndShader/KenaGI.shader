@@ -207,7 +207,7 @@ Shader "Kena/KenaGI"
 
                 //Sample Diffuse 
                 half4 df = SAMPLE_TEXTURE2D(_Diffuse, sampler_Diffuse, suv); 
-                //test = df; 
+                //test = df;   
 
                 //spec_power_mask 
                 half spec_base_intensity = rifr.y * 0.08; 
