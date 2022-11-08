@@ -131,7 +131,7 @@ Shader "Kena/KenaGI"
                 v2f OUT;
                 UNITY_SETUP_INSTANCE_ID(IN);
                 //UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(OUT);
-                OUT.vertex = TransformObjectToHClip(IN.vertex);
+                OUT.vertex = TransformObjectToHClip(IN.vertex); 
                 OUT.uv = IN.uv;
 
                 return OUT;
