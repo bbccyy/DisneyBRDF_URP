@@ -377,7 +377,7 @@ Shader "Kena/KenaGI"
                         half3 camToPixelDirRaw2 = V_CB1_48.xyz * coord.xxx;
                         camToPixelDirRaw2       = V_CB1_49.xyz * coord.yyy      + camToPixelDirRaw2;
                         camToPixelDirRaw2       = V_CB1_50.xyz * half3(1, 1, 1) + camToPixelDirRaw2;
-                        half3 camToPxlDir2 = normalize(camToPixelDirRaw2);
+                        half3 camToPxlDir2 = normalize(camToPixelDirRaw2); 
                         half3 viewDir2 = -camToPxlDir2;
                         //test.xyz = abs(viewDir - viewDir2);  //验证上述代码求解出的 viewDir 与 之前通过像素点世界坐标与摄像机坐标求解出的 viewDir 是一致的 
 
