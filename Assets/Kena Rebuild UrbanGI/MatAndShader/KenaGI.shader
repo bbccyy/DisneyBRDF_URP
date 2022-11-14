@@ -410,7 +410,7 @@ Shader "Kena/KenaGI"
                         //以下可以看做是对cos值的 Scale 和 Transform 
                         half2 cos_AtoT_ST = half2(0.5, 17.0) * cos_AtoT + half2(0.5, -16.780001); 
                         cos_AtoT_ST.x = saturate(cos_AtoT_ST.x); 
-                        half sqrt_cosAtoTst = sqrt(cos_AtoT_ST.x); //该值目前看恒为 1 
+                        half sqrt_cosAtoTst = sqrt(cos_AtoT_ST.x); //该值目前看恒为 1  
 
                         rough_7 = rough_7 * rough_7; 
                         half rough_factor_1 = rough_7 + 0.2; 
