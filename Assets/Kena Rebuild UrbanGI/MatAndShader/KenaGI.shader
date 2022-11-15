@@ -467,7 +467,7 @@ Shader "Kena/KenaGI"
                     virtual_light = V_CB1_180 * max(virtual_light, half3(0, 0, 0));   //经过V_CB1_180缩放后，返回值可能会大于1.0 
                     //test.xyz = virtual_light * 0.5;
                     //#6号渲染通路的disturb返回值最终是基于"法线扰动" & "AO" & "材质参数"的混合 
-                    ao_scale = AO_from_RN * AO_final * virtual_light + V_CB0_1 * (1 - AO_final);
+                    ao_scale = AO_from_RN * AO_final * virtual_light + V_CB0_1 * (1 - AO_final); 
                     
                     R10.xyz = R10.xyz * ao_scale + ao_scale_from_6;  //这是个颜色, 推测为完整的 Diffuse 
                     //test.xyz = R10.xyz;
