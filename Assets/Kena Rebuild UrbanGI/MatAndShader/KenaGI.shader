@@ -461,7 +461,7 @@ Shader "Kena/KenaGI"
                     half4 biasN = half4(bias_N.xyz, 1.0);   //测试调整为bias_N.xzy 与 bias_N.xyz对比 
                     half3 bias_biasN = mul(M_CB1_181, biasN); 
                     half4 mixN = biasN.yzzx * biasN.xyzz; 
-                    half3 bias_mixN = mul(M_CB1_184, mixN);  //值域小于0，查看时使用 -bias_mixN 
+                    half3 bias_mixN = mul(M_CB1_184, mixN);  //值域小于0，查看时使用 -bias_mixN  
                     //base_disturb * scale + bias 
                     half3 virtual_light = V_CB1_187 * (biasN.x * biasN.x - biasN.y * biasN.y) + (bias_biasN + bias_mixN);
                     virtual_light = V_CB1_180 * max(virtual_light, half3(0, 0, 0));   //经过V_CB1_180缩放后，返回值可能会大于1.0 
