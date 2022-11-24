@@ -474,7 +474,7 @@ Shader "Kena/KenaGI"
 
                     half intense = dot(half3(0.3, 0.59, 0.11), R10.xyz); 
                     half check = 1.0 == 0;      //返回false -> 相当于关闭了alpha通道 -> cb1[200].z == 0 ? 
-                    //output.alpha 主要来自于从R10(gi_diffuse)颜色提取的光强度值 -> intense
+                    //output.alpha 主要来自于从R10(gi_diffuse)颜色提取的光强度值 -> intense 
                     //除此之外还需要手动开启 check符号位 以及符合 #9或#5号渲染通道，不然alpha输出值为0 
                     output.w = half((uint(check) & uint(intense)) & is9or5);    //此处返回恒为 0 
                 }
