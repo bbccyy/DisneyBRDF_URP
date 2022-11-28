@@ -454,7 +454,7 @@ Shader "Kena/KenaGI"
                     uint is8 = condi.x == uint(8); 
                     is8 = 0; //TODO: 手动清除噪点 
                     R10.xyz = frxxPow2.xyz * frxx_condi.w + R15.xyz; 
-                    R10.xyz = is8 ? R10.xyz : R15.xyz;   
+                    R10.xyz = is8 ? R10.xyz : R15.xyz; 
                     
                     //以下逻辑与之前处理 #6 渲染通道时雷同 
                     //推测是计算 GI_Virtual_Directional_Light 的照射强度，因为计算结合依赖于表面法线的某几个维度 
