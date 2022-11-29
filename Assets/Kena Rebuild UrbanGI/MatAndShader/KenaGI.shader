@@ -478,7 +478,7 @@ Shader "Kena/KenaGI"
                     //除此之外还需要手动开启 check符号位 以及符合 #9或#5号渲染通道，不然alpha输出值为0 
                     output.w = half((uint(check) & uint(intense)) & is9or5);    //此处返回恒为 0 
                 }
-                else //对于 #0 号 渲染通道 
+                else //对于 #0 号 渲染通道  
                 {
                     R10 = half4(0, 0, 0, 0); 
                     output.w = 0; 
