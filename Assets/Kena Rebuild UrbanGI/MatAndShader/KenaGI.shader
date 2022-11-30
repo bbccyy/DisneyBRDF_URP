@@ -520,7 +520,7 @@ Shader "Kena/KenaGI"
 
                     //如下输出的是被T12.w通道修正过的'AO噪声'高频部分系数 
                     half mixed_ao = df.w * ao + NoV_sat; //TexAO * Computered_AO(SSAO.r) + saturate(NdotV) -> mixed_AO 
-                    half AOwthRoughNoise = df.w * ao + pow(mixed_ao, roughSquare);
+                    half AOwthRoughNoise = df.w * ao + pow(mixed_ao, roughSquare); 
                     AOwthRoughNoise = saturate(AOwthRoughNoise - 1);  //-> r0.y -> 只截取超过1的部分，这部分可以看做是AO叠加上Rough后的高频噪声 
                     //half spec_scaler = spec_add.w;    //spec_add.w是高光强度控制阀 
                     half spec_scaler = 0.5;             //TODO: 避免噪点，使用0.5替代spec_add.w 
