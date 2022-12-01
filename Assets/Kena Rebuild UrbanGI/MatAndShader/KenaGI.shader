@@ -511,7 +511,7 @@ Shader "Kena/KenaGI"
                     half3 VR_lift = lerp(norm, VR, rate);  //暂且定义为‘上抬视反’(注:没有归一化) ，具体反射向量上抬角度受rough控制 -> 简言之越粗糙，反射视线越接近法线朝向 
                     
                     //使用屏幕UV采样 T12 -> 这张纹理看起来对水晶,金属扣环等物体做了处理 -> 疑似关联 spec 
-                    //T12.xyz分量推测是对高光项的线性的附加补充量 
+                    //T12.xyz分量推测是对高光项的线性的附加补充量
                     //T12.w分量是高光项的强度 
                     half4 spec_add_raw = SAMPLE_TEXTURE2D(_Spec, sampler_Spec, suv);
                     half spec_mask = 1 - spec_add_raw.w;  //后续会作用到环境光第二高光波瓣强度的重建过程中 -> 强度遮罩 -> 此处恒为0 
