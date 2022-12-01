@@ -556,7 +556,7 @@ Shader "Kena/KenaGI"
                             {
                                 //以下准备中间计算量 
                                 half rough_chan6 = max(rifr.w, 0.1);
-                                //half pi_RN_raw_Len = _pi * (RN_raw_Len * 1);
+                                //half pi_RN_raw_Len = _pi * (RN_raw_Len * 1); 
                                 half RNoVRLift = dot(d_norm, VR_lift);
                                 RN_raw_Len = max(RN_raw_Len, 0.001);
 
