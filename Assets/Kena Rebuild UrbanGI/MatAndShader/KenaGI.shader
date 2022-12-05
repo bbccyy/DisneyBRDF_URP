@@ -576,7 +576,7 @@ Shader "Kena/KenaGI"
                     }
                     else
                     {
-                        gi_spec_base = half3(0, 0, 0); 
+                        gi_spec_base = half3(0, 0, 0);  
                         smoothness = 1;
                     }
                     //<---------- 
