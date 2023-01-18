@@ -56,9 +56,9 @@ Material:
     - _QueueOffset: 0
     - _Redness: 0.225
     - _Roughness: 0.221
-    - _SpecularScale: 2.02
+    - _SpecularScale: 2.03
     m_Colors:
-    - _DyeColor: {r: 0.6792453, g: 0.6792453, b: 0.6792453, a: 1}
+    - _DyeColor: {r: 0.8396226, g: 0.8396226, b: 0.8396226, a: 1}
     - _Melanin: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []
 --- !u!114 &7369483971361760971

@@ -167,7 +167,7 @@ Shader "Kena/KenaGI"
                                                           //使用1作为最后一维的量 -> 将float4(coord.xy, d, 1)视为在hclip中的一个点，参与矩阵变换 
 
                 //use matrix_Inv_VP to rebuild posWS 
-                float4 posWS = mul(M_Inv_VP, hclip);  //注意UE4下，posWS的单位是 "厘米" 
+                float4 posWS = mul(M_Inv_VP, hclip);  //注意UE4下，posWS的单位是 "厘米"  
 
                 //cameraToPixelDir (取反得viewDir: 从视点触发指向摄像机) 
                 half3 cameraToPixelDir = normalize(posWS.xyz - camPosWS); 
@@ -190,8 +190,8 @@ Shader "Kena/KenaGI"
                 uint chessboard = (jointPixelIdx.x + jointPixelIdx.y + 1) & 0x00000001; 
                 half2 chessMask = chessboard ? half2(1, 0) : half2(0, 1); 
 
-                //Sample _R_I_F_R 
-                half4 rifr = SAMPLE_TEXTURE2D(_R_I_F_R, sampler_R_I_F_R, suv);     
+                //Sample _R_I_F_R  -> 修正为 Metallic_DieletricSpe_Rough_Flag @wyx 2023-1-18 
+                half4 rifr = SAMPLE_TEXTURE2D(_R_I_F_R, sampler_R_I_F_R, suv); 
                 uint flag = (uint)round(rifr.z * 255.0);
                 uint2 condi = flag & uint2(15, 16);//condi.x控制像素渲染逻辑(颜色表现丰富则噪点密集，表现单一则成块同色), y控制颜色混合;  
                 /* 对condi的计算等效如下代码: 
