@@ -137,6 +137,7 @@ Shader "Kena/KenaGI"
                 return OUT;
             }
 
+            //TODO: Apply new modification 
             half4 frag (v2f IN) : SV_Target
             {
                 half4 test = half4(0, 0, 0, 0);  //JUST FOR SHOW CASE 
@@ -170,10 +171,10 @@ Shader "Kena/KenaGI"
                 float4 posWS = mul(M_Inv_VP, hclip);  //注意UE4下，posWS的单位是 "厘米"  
 
                 //cameraToPixelDir (取反得viewDir: 从视点触发指向摄像机) 
-                half3 cameraToPixelDir = normalize(posWS.xyz - camPosWS); 
+                half3 cameraToPixelDir = normalize(posWS.xyz - camPosWS);  
                 half3 viewDir = -cameraToPixelDir;
                 /*
-                //开启这段代码用于交叉验证 posWS的准确性 -> 如果posWS不是像素点的世界坐标
+                //开启这段代码用于交叉验证 posWS的准确性 -> 如果posWS不是像素点的世界坐标 
                 //那么摄像机世界坐标到posWS所描述的点的距离不会出现由进到远的分层效果 
                 test.xyz = posWS.xyz - camPosWS;
                 test.x = sqrt(dot(test.xyz, test.xyz)) / 1000;
