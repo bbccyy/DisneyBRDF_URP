@@ -151,7 +151,7 @@ Shader "Kena/KenaGI"
                 half tmp1 = 0; 
                 half2 tmp2 = half2(0, 0);
                 half3 tmp3 = half3(0, 0, 0);
-                half3 tmp_col = half3(0, 0, 0);
+                half3 tmp_col = half3(0, 0, 0);  
 
                 //Start here 
                 half2 suv = IN.vertex.xy * screen_param.zw;     //screen uv 
