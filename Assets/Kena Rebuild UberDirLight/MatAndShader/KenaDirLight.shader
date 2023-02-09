@@ -29,8 +29,8 @@
 
 			struct appdata
 			{
-				float4 vertex	: POSITION;
-				float2 uv		: TEXCOORD0;
+				float4 positionOS	: POSITION;
+				float2 uv			: TEXCOORD0;
 				UNITY_VERTEX_INPUT_INSTANCE_ID
 			};
 
@@ -53,12 +53,59 @@
 			TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
 
 
-			static float4 screen_param = float4(1708, 960, 1.0 / 1708, 1.0 / 960);
+			static float4 screen_param = float4(1707, 960, 0.00059, 0.00104);
+
+			static float4 zBufferParams = float4(0.00, 0.00, 0.10, -1.00000E-08); //CB0[65].xyzw 
+
+			static float4 cameraPosWSoffset = float4(-58625.35547, 27567.39453, -6383.71826, 0);
+
+			static float3x3 Matrix_Inv_P = float3x3(
+				float3(0.7495,			0.11887,	-0.5012),
+				float3(-0.49857,		0.1787,		-0.75428),
+				float3(-2.68273E-08,	0.4585,		0.42411)
+				);
+
+
+			v2f vert(appdata IN)
+			{
+				v2f OUT = (v2f)0;
+				UNITY_SETUP_INSTANCE_ID(IN);
+				//OUT.uv = (IN.uv * screen_param.xy) * screen_param.zw;
+				OUT.uv = IN.uv;
+				OUT.positionPS = TransformObjectToHClip(IN.positionOS);
+
+				float2 ndc_xy = IN.uv * 2 - 1;  //放到[-1,1]区间 
+				ndc_xy = ndc_xy * float2(1.0, -1.0);
+
+				OUT.viewDir = mul(Matrix_Inv_P, float3(ndc_xy.xy, 1));
+
+				return OUT;
+			}
+
+			half4 frag(v2f IN) : SV_Target
+			{
+				half4 test = half4(0,0,0,1);
+
+				test.xyz = normalize(IN.viewDir);
+
+				//TODO 
+				half4 comp_m_d_r_f = SAMPLE_TEXTURE2D(_Comp_M_D_R_F, sampler_Comp_M_D_R_F, IN.uv);
+
+				half deviceZ = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, IN.uv);
+
+				half sceneDepth = deviceZ* zBufferParams.x + zBufferParams.y + 1.0 / (deviceZ * zBufferParams.z - zBufferParams.w);
+
+				half3 posWS = normalize(IN.viewDir) * sceneDepth + cameraPosWSoffset.xyz; 
 
 
 
 
 
+
+
+
+				return half4(posWS, 1);
+			}
 
 			ENDHLSL
 		}
