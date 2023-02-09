@@ -147,11 +147,11 @@ Shader "Kena/KenaGI"
                 //最终输出值
                 half4 output = half4(0, 0, 0, 0);
 
-                //辅助临时变量(存放计算中间量) 
-                half tmp1 = 0; 
+                //辅助临时变量(存放计算中间量)
+                half tmp1 = 0;
                 half2 tmp2 = half2(0, 0);
                 half3 tmp3 = half3(0, 0, 0);
-                half3 tmp_col = half3(0, 0, 0);  
+                half3 tmp_col = half3(0, 0, 0);
 
                 //Start here 
                 half2 suv = IN.vertex.xy * screen_param.zw;     //screen uv 
