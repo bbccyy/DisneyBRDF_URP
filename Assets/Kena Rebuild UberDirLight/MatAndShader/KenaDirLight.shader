@@ -57,7 +57,7 @@
 
 			static float4 zBufferParams = float4(0.00, 0.00, 0.10, -1.00000E-08); //CB0[65].xyzw 
 
-			static float4 cameraPosWSoffset = float4(-58625.35547, 27567.39453, -6383.71826, 0);
+			static float4 CameraPosWS = float4(-58625.35547, 27567.39453, -6383.71826, 0);
 
 			static float3x3 Matrix_Inv_VP = float3x3(
 				float3(0.7495,			0.11887,	-0.5012),
@@ -84,28 +84,27 @@
 
 			half4 frag(v2f IN) : SV_Target
 			{
-				half4 test = half4(0,0,0,1);
-
-				test.xyz = normalize(IN.viewDirWS);
+				half4 test = half4(0,0,0,1);  //用于测试输出 
 
 				//采样Comp，提取Flag位
 				half4 comp_m_d_r_f = SAMPLE_TEXTURE2D(_Comp_M_D_R_F, sampler_Comp_M_D_R_F, IN.uv);
 				uint raw_flag = (uint)round(comp_m_d_r_f.w * 255); 
 				uint mat_type = raw_flag & (uint)15;
+				//uint tmp = mat_type == (uint)0; //显示天空,此外(8)衣服,(7)头发,(5)皮肤,(6)草木等 
 
 				half deviceZ = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, IN.uv);
 
 				half sceneDepth = deviceZ* zBufferParams.x + zBufferParams.y + 1.0 / (deviceZ * zBufferParams.z - zBufferParams.w);
 
-				half3 posWS = normalize(IN.viewDirWS) * sceneDepth + cameraPosWSoffset.xyz;
+				half3 posWS = normalize(IN.viewDirWS) * sceneDepth + CameraPosWS.xyz;
 
-				test.xyz = abs(posWS - cameraPosWSoffset.xyz) / 35000;
-
-
-				uint tmp = mat_type == (uint)7;
+				test.xyz = abs(posWS - CameraPosWS.xyz) / 35000; //用于验证世界坐标解码后的正确性 
 
 
-				return half4(tmp.xxx, 1);
+				
+
+
+				return half4(test.xyz, 1);
 			}
 
 			ENDHLSL
