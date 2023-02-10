@@ -36,9 +36,9 @@
 
 			struct v2f
 			{
-				float4 positionPS	: SV_POSITION;
+				float4 vertex		: SV_POSITION;
 				float2 uv			: TEXCOORD0;
-				float3 viewDirWS		: TEXCOORD1;
+				float3 viewDirWS	: TEXCOORD1;
 				UNITY_VERTEX_OUTPUT_STEREO
 			};
 
@@ -52,6 +52,16 @@
 			TEXTURE2D(_ShadowTex); SAMPLER(sampler_ShadowTex);
 			TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
 
+
+			float InterleavedGradientNoise(float2 uv, float frameId)
+			{
+				uv += frameId * float2(32.665f, 11.815f);
+				const float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
+				return frac(magic.z * frac(dot(uv, magic.xy)));
+			}
+
+
+			static float FrameId = 3;
 
 			static float4 screen_param = float4(1707, 960, 0.00059, 0.00104);
 
@@ -72,7 +82,7 @@
 				UNITY_SETUP_INSTANCE_ID(IN);
 				//OUT.uv = (IN.uv * screen_param.xy) * screen_param.zw;
 				OUT.uv = IN.uv;
-				OUT.positionPS = TransformObjectToHClip(IN.positionOS);
+				OUT.vertex = TransformObjectToHClip(IN.positionOS);
 
 				float2 ndc_xy = IN.uv * 2 - 1;  //放到[-1,1]区间 
 				ndc_xy = ndc_xy * float2(1.0, -1.0);
@@ -90,21 +100,26 @@
 				half4 comp_m_d_r_f = SAMPLE_TEXTURE2D(_Comp_M_D_R_F, sampler_Comp_M_D_R_F, IN.uv);
 				uint raw_flag = (uint)round(comp_m_d_r_f.w * 255); 
 				uint mat_type = raw_flag & (uint)15;
-				//uint tmp = mat_type == (uint)0; //显示天空,此外(8)衣服,(7)头发,(5)皮肤,(6)草木等 
+				uint see_flag = mat_type == (uint)9; //(0)显示天空,此外(9)眼, (8)衣服,(7)头发,(5)皮肤,(6)草,(1)木等 
 
-				half deviceZ = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, IN.uv);
+				if (mat_type)  //不是天空的进入 
+				{
+					//首先重构世界坐标 
+					float deviceZ = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, IN.uv);
+					float sceneDepth = deviceZ * zBufferParams.x + zBufferParams.y + 1.0 / (deviceZ * zBufferParams.z - zBufferParams.w);
+					half3 ViewDirWS = normalize(IN.viewDirWS);
+					float3 posWS = ViewDirWS * sceneDepth + CameraPosWS.xyz;
+					//test.xyz = abs(posWS - CameraPosWS.xyz) / 35000; //用于验证世界坐标解码后的正确性 
 
-				half sceneDepth = deviceZ* zBufferParams.x + zBufferParams.y + 1.0 / (deviceZ * zBufferParams.z - zBufferParams.w);
+					float dither = InterleavedGradientNoise(IN.vertex, FrameId);
 
-				half3 posWS = normalize(IN.viewDirWS) * sceneDepth + CameraPosWS.xyz;
+					test.xyz = dither;
 
-				test.xyz = abs(posWS - CameraPosWS.xyz) / 35000; //用于验证世界坐标解码后的正确性 
-
-
+				}
 				
 
 
-				return half4(test.xyz, 1);
+				return half4(see_flag.xxx, 1);
 			}
 
 			ENDHLSL
