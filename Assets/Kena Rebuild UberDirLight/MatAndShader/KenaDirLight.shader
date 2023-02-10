@@ -38,7 +38,7 @@
 			{
 				float4 positionPS	: SV_POSITION;
 				float2 uv			: TEXCOORD0;
-				float3 viewDir		: TEXCOORD1;
+				float3 viewDirWS		: TEXCOORD1;
 				UNITY_VERTEX_OUTPUT_STEREO
 			};
 
@@ -59,7 +59,7 @@
 
 			static float4 cameraPosWSoffset = float4(-58625.35547, 27567.39453, -6383.71826, 0);
 
-			static float3x3 Matrix_Inv_P = float3x3(
+			static float3x3 Matrix_Inv_VP = float3x3(
 				float3(0.7495,			0.11887,	-0.5012),
 				float3(-0.49857,		0.1787,		-0.75428),
 				float3(-2.68273E-08,	0.4585,		0.42411)
@@ -77,7 +77,7 @@
 				float2 ndc_xy = IN.uv * 2 - 1;  //放到[-1,1]区间 
 				ndc_xy = ndc_xy * float2(1.0, -1.0);
 
-				OUT.viewDir = mul(Matrix_Inv_P, float3(ndc_xy.xy, 1));
+				OUT.viewDirWS = mul(Matrix_Inv_VP, float3(ndc_xy.xy, 1));
 
 				return OUT;
 			}
@@ -86,25 +86,26 @@
 			{
 				half4 test = half4(0,0,0,1);
 
-				test.xyz = normalize(IN.viewDir);
+				test.xyz = normalize(IN.viewDirWS);
 
-				//TODO 
+				//采样Comp，提取Flag位
 				half4 comp_m_d_r_f = SAMPLE_TEXTURE2D(_Comp_M_D_R_F, sampler_Comp_M_D_R_F, IN.uv);
+				uint raw_flag = (uint)round(comp_m_d_r_f.w * 255); 
+				uint mat_type = raw_flag & (uint)15;
 
 				half deviceZ = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, IN.uv);
 
 				half sceneDepth = deviceZ* zBufferParams.x + zBufferParams.y + 1.0 / (deviceZ * zBufferParams.z - zBufferParams.w);
 
-				half3 posWS = normalize(IN.viewDir) * sceneDepth + cameraPosWSoffset.xyz; 
+				half3 posWS = normalize(IN.viewDirWS) * sceneDepth + cameraPosWSoffset.xyz;
+
+				test.xyz = abs(posWS - cameraPosWSoffset.xyz) / 35000;
 
 
+				uint tmp = mat_type == (uint)7;
 
 
-
-
-
-
-				return half4(posWS, 1);
+				return half4(tmp.xxx, 1);
 			}
 
 			ENDHLSL
