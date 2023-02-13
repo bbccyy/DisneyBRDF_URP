@@ -96,11 +96,11 @@
 			{
 				half4 test = half4(0,0,0,1);  //用于测试输出 
 
-				//采样Comp，提取Flag位
+				//采样Comp，提取Flag位 
 				half4 comp_m_d_r_f = SAMPLE_TEXTURE2D(_Comp_M_D_R_F, sampler_Comp_M_D_R_F, IN.uv);
 				uint raw_flag = (uint)round(comp_m_d_r_f.w * 255); 
-				uint mat_type = raw_flag & (uint)15;
-				uint see_flag = mat_type == (uint)9; //(0)显示天空,此外(9)眼, (8)衣服,(7)头发,(5)皮肤,(6)草,(1)木等 
+				uint mat_type = raw_flag & (uint)15; 
+				uint see_flag = mat_type == (uint)5; //(0)显示天空,此外(9)眼, (8)衣服,(7)头发,(5)皮肤,(6)草,(1)木等 
 
 				if (mat_type)  //不是天空的进入 
 				{
