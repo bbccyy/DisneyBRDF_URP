@@ -196,6 +196,7 @@
 			half4 frag(v2f IN) : SV_Target
 			{
 				half4 test = half4(0,0,0,1);  //用于测试输出 
+				float tmp1 = 0;
 
 				//采样Comp，提取Flag位 
 				half4 comp_m_d_r_f = SAMPLE_TEXTURE2D(_Comp_M_D_R_F, sampler_Comp_M_D_R_F, IN.uv);
@@ -243,6 +244,8 @@
 						ContactShadowLength = LightData_ContactShadowLength * (LightData_ContactShadowLength < 0.0f ? 1.0f : ContactShadowLengthScreenScale);
 					}
 
+					uint2 IsEyeHair = mat_type.xx == uint2(9, 7);
+
 					float StepOffset = Dither - 0.5;
 					float ContactShadow = ShadowRayCast(
 						posWS - CameraPosWS.xyz, 
@@ -252,8 +255,11 @@
 						StepOffset);
 
 					SurfaceShadow *= ContactShadow;
+					TransmissionShadow = IsEyeHair.y ? 
+						TransmissionShadow * ContactShadow : 
+						(IsEyeHair.x ? TransmissionShadow : TransmissionShadow * (ContactShadow * 0.5 + 0.5));
 
-					test.x = SurfaceShadow;
+					test.x = TransmissionShadow;
 
 				}
 				
