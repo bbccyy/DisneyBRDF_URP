@@ -27,6 +27,23 @@
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 			#define _pi 3.141593f 
 
+			//@ShadingCommon 
+			// SHADINGMODELID_* occupy the 4 low bits of an 8bit channel and SKIP_* occupy the 4 high bits
+			#define SHADINGMODELID_UNLIT				0
+			#define SHADINGMODELID_DEFAULT_LIT			1
+			#define SHADINGMODELID_SUBSURFACE			2
+			#define SHADINGMODELID_PREINTEGRATED_SKIN	3
+			#define SHADINGMODELID_CLEAR_COAT			4
+			#define SHADINGMODELID_SUBSURFACE_PROFILE	5
+			#define SHADINGMODELID_TWOSIDED_FOLIAGE		6
+			#define SHADINGMODELID_HAIR					7
+			#define SHADINGMODELID_CLOTH				8
+			#define SHADINGMODELID_EYE					9
+			#define SHADINGMODELID_SINGLELAYERWATER		10
+			#define SHADINGMODELID_THIN_TRANSLUCENT		11
+			#define SHADINGMODELID_NUM					12
+			#define SHADINGMODELID_MASK					0xF		// 4 bits reserved for ShadingModelID		
+
 			struct appdata
 			{
 				float4 positionOS	: POSITION;
@@ -42,6 +59,25 @@
 				UNITY_VERTEX_OUTPUT_STEREO
 			};
 
+			struct FGBufferData
+			{
+				// normalized
+				float3 WorldNormal;
+				// normalized, only valid if GBUFFER_HAS_TANGENT
+				float3 WorldTangent;
+				// 0..1 (derived from BaseColor, Metalness, Specular)
+				float3 DiffuseColor;
+				// 0..1 (derived from BaseColor, Metalness, Specular)
+				float3 SpecularColor;
+				// 0..1, white for SHADINGMODELID_SUBSURFACE_PROFILE and SHADINGMODELID_EYE (apply BaseColor after scattering is more correct and less blurry)
+				float3 BaseColor;
+				float Metallic; // 0..1
+				float Specular; // 0..1
+				float Roughness;
+				uint ShadingModelID;
+				float Depth;
+			};
+
 			TEXTURE2D(_SSS); SAMPLER(sampler_SSS);
 			TEXTURE2D(_Depth); SAMPLER(sampler_Depth);
 			TEXTURE2D(_Normal); SAMPLER(sampler_Normal);
@@ -52,45 +88,33 @@
 			TEXTURE2D(_ShadowTex); SAMPLER(sampler_ShadowTex);
 			TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
 
-			static float FrameId = 3; 
 
+			static float FrameId = 3; 
 			const static float LightData_ShadowedBits = 3;
 			const static float LightData_ContactShadowLength = 0.2;
-
 			static float4 screen_param = float4(1707, 960, 0.00059, 0.00104); 
-
-			//光方向(指向光源) TODO -> 确认不同截帧中该数值是否一致  
-			static float3 light_direction = float3(0.51555, -0.29836, 0.80324); 
-			//static float3 light_direction = float3(-1, 0, 0);  //光方向(指向光源) 
-
+			static float3 light_direction = float3(0.51555, -0.29836, 0.80324); //光方向(指向光源) 
 			static float4 LightData_ShadowMapChannelMask = float4(0,0,0,0);
-
-			static float4 zBufferParams = float4(0.00, 0.00, 0.10, -1.00000E-08); //CB0[65] 用于SceneDepth=Decode(DeviceZ) 
-
+			static float4 InvDeviceZToWorldZTransform = float4(0.00, 0.00, 0.10, -1.00000E-08); //CB0[65] 对应Unity的zBufferParams  
 			static float4 ScreenPositionScaleBias = float4(0.49971, -0.50, 0.50, 0.49971); //CB0[66] 从NDC变换到UV空间 
-
 			static float4 CameraPosWS = float4(-58625.35547, 27567.39453, -6383.71826, 0); //世界空间中摄像机的坐标值 
-
 			static float4x4 Matrix_VP = float4x4(
 				float4(0.9252,		-0.61489,	-0.00021,	0.00),
 				float4(0.46399,		0.69752,	1.78886,	0.00),
 				float4(0.00,		0.00,		0.00,		10.00),
 				float4(-0.50162,	-0.75408,	0.42396,	0.00)
 				);
-
 			static float3x3 Matrix_Inv_VP = float3x3(
 				float3(0.7495,			0.11887,	-0.5012),
 				float3(-0.49857,		0.1787,		-0.75428),
 				float3(-2.68273E-08,	0.4585,		0.42411)
 				);
-
 			static float4x4 Matrix_Inv_P = float4x4(			//CB0[36] ~ CB0[39]
 				float4(0.90018, 0,			0,		0.00045	),
 				float4(0,	    0.50625,	0,		0.00017	),
 				float4(0,		0,			0,		1		),
 				float4(0,		0,			0.10,	0		)
 				);
-
 			static float4x4 Matrix_P = float4x4(				//CB0[32] ~ CB0[35]
 				float4(1.11089,		0,			0,		0),
 				float4(0,			1.97531,	0,		0),
@@ -98,6 +122,50 @@
 				float4(0,			0,			1,		0)
 				);
 
+
+			bool CheckerFromSceneColorUV(float2 UVSceneColor)
+			{
+				// relative to left top of the rendertarget (not viewport)
+				uint2 PixelPos = uint2(UVSceneColor * screen_param.xy);
+				uint TemporalAASampleIndex = 3; 
+				return (PixelPos.x + PixelPos.y + TemporalAASampleIndex) & 1;
+			}
+
+			uint DecodeShadingModelId(float InPackedChannel)
+			{
+				return ((uint)round(InPackedChannel * (float)0xFF)) & SHADINGMODELID_MASK;
+			}
+
+			float ConvertFromDeviceZ(float DeviceZ)
+			{
+				// Supports ortho and perspective, see CreateInvDeviceZToWorldZTransform()
+				return DeviceZ * InvDeviceZToWorldZTransform[0] + InvDeviceZToWorldZTransform[1] + 1.0f / (DeviceZ * InvDeviceZToWorldZTransform[2] - InvDeviceZToWorldZTransform[3]);
+			}
+
+			FGBufferData DecodeGBufferData(float3 Normal_Raw, float4 Albedo_Raw, float4 Comp_M_D_R_F_Raw, float4 Comp_F_R_X_I_Raw, float4 ShadowTex_Raw, float SceneDepth)
+			{
+				FGBufferData Out = (FGBufferData)0;
+
+
+
+
+				return Out;
+			}
+
+			FGBufferData GetGBufferData(float2 UV, bool bGetNormalizedNormal = true)
+			{
+				FGBufferData Out = (FGBufferData)0;
+				float DeviceZ = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, UV).r;
+				float3 Normal_Raw = SAMPLE_TEXTURE2D(_Normal, sampler_Normal, UV).xyz;
+				float4 Albedo_Raw = SAMPLE_TEXTURE2D(_Albedo, sampler_Albedo, UV).xyzw;
+				float4 Comp_M_D_R_F_Raw = SAMPLE_TEXTURE2D(_Comp_M_D_R_F, sampler_Comp_M_D_R_F, UV).xyzw;
+				float4 Comp_F_R_X_I_Raw = SAMPLE_TEXTURE2D(_Comp_F_R_X_I, sampler_Comp_F_R_X_I, UV).xyzw;
+				float4 ShadowTex_Raw = SAMPLE_TEXTURE2D(_ShadowTex, sampler_ShadowTex, UV).xyzw;
+
+				float SceneDepth = ConvertFromDeviceZ(DeviceZ);
+
+				return DecodeGBufferData(Normal_Raw, Albedo_Raw, Comp_M_D_R_F_Raw, Comp_F_R_X_I_Raw, ShadowTex_Raw, SceneDepth);
+			}
 
 			float InterleavedGradientNoise(float2 uv, float frameId)
 			{
@@ -200,18 +268,19 @@
 
 				//采样Comp，提取Flag位 
 				half4 comp_m_d_r_f = SAMPLE_TEXTURE2D(_Comp_M_D_R_F, sampler_Comp_M_D_R_F, IN.uv);
-				uint raw_flag = (uint)round(comp_m_d_r_f.w * 255); 
-				uint mat_type = raw_flag & (uint)15; 
-				//uint see_flag = mat_type == (uint)5; //(0)显示天空,此外(9)眼, (8)衣服,(7)头发,(5)皮肤,(6)草,(1)木等 
+
+				uint raw_flag = (uint)round(comp_m_d_r_f.w * 0xFF); // Decode ShadingModelId
+				uint mat_type = raw_flag & SHADINGMODELID_MASK; 
+				//uint see_flag = mat_type == (uint)8; //(0)显示天空,此外(9)眼, (8)衣服,(7)头发,(5)皮肤,(6)草,(1)木等 
 
 				if (mat_type)  //不是天空的进入 
 				{
 					//首先重构世界坐标 
 					float deviceZ = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, IN.uv);
-					float sceneDepth = deviceZ * zBufferParams.x + zBufferParams.y + 1.0 / (deviceZ * zBufferParams.z - zBufferParams.w);
+					float sceneDepth = deviceZ * InvDeviceZToWorldZTransform[0] + InvDeviceZToWorldZTransform[1] + 1.0 / (deviceZ * InvDeviceZToWorldZTransform[2] - InvDeviceZToWorldZTransform[3]);
 					half3 ViewDirWS = normalize(IN.viewDirWS);
 					float3 posWS = ViewDirWS * sceneDepth + CameraPosWS.xyz;
-					//test.xyz = abs(posWS - CameraPosWS.xyz) / 35000; //用于验证世界坐标解码后的正确性 
+					test.xyz = abs(posWS - CameraPosWS.xyz) / 35000; //用于验证世界坐标解码后的正确性 
 
 					//在一定屏幕空间范围内的随机变量，一般用于模糊摩尔纹或其他异样 
 					float Dither = InterleavedGradientNoise(IN.vertex, FrameId); 
@@ -227,13 +296,13 @@
 					float UsesStaticShadowMap = dot(LightData_ShadowMapChannelMask, float4(1, 1, 1, 1));
 					float StaticShadowing = lerp(1, dot(PrecomputedShadowFactors, LightData_ShadowMapChannelMask), UsesStaticShadowMap);
 
-					float DynamicShadowFraction = DistanceFromCameraFade(sceneDepth);
+					float DynamicShadowFraction = DistanceFromCameraFade(sceneDepth); //依据距离远近 
 
 					// For a directional light, fade between static shadowing and the whole scene dynamic shadowing based on distance + per object shadows
-					float SurfaceShadow = lerp(LightAttenuation.x, StaticShadowing, DynamicShadowFraction);
+					float SurfaceShadow = lerp(LightAttenuation.x, StaticShadowing, DynamicShadowFraction); //调和动态和静态阴影 
 					// Fade between SSS dynamic shadowing and static shadowing based on distance
 					float TransmissionShadow = min(lerp(LightAttenuation.y, StaticShadowing, DynamicShadowFraction), LightAttenuation.w);
-
+					
 					SurfaceShadow *= LightAttenuation.z;
 					TransmissionShadow *= LightAttenuation.z;
 
@@ -241,10 +310,8 @@
 					UNITY_FLATTEN
 					if (LightData_ShadowedBits > 1 && LightData_ContactShadowLength > 0)
 					{
-						ContactShadowLength = LightData_ContactShadowLength * (LightData_ContactShadowLength < 0.0f ? 1.0f : ContactShadowLengthScreenScale);
+						ContactShadowLength = LightData_ContactShadowLength * ContactShadowLengthScreenScale; 
 					}
-
-					uint2 IsEyeHair = mat_type.xx == uint2(9, 7);
 
 					float StepOffset = Dither - 0.5;
 					float ContactShadow = ShadowRayCast(
@@ -255,11 +322,15 @@
 						StepOffset);
 
 					SurfaceShadow *= ContactShadow;
+
+					uint2 IsEyeHair = mat_type.xx == uint2(9, 7);
 					TransmissionShadow = IsEyeHair.y ? 
 						TransmissionShadow * ContactShadow : 
-						(IsEyeHair.x ? TransmissionShadow : TransmissionShadow * (ContactShadow * 0.5 + 0.5));
+						(IsEyeHair.x ? TransmissionShadow : TransmissionShadow * (ContactShadow * 0.5 + 0.5)); 
 
-					test.x = TransmissionShadow;
+					//test.x = SurfaceShadow;
+
+					//test.x = CheckerFromSceneColorUV(IN.uv);
 
 				}
 				
