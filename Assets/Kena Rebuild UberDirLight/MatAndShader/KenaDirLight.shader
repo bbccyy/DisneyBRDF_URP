@@ -78,15 +78,55 @@
 				float3 SpecularColor;
 				// 0..1, white for SHADINGMODELID_SUBSURFACE_PROFILE and SHADINGMODELID_EYE (apply BaseColor after scattering is more correct and less blurry)
 				float3 BaseColor;
+				float4 CustomData;
 				float Metallic; // 0..1
 				float Specular; // 0..1
 				float Roughness; // 0..1
 				float GBufferAO; // 0..1
 				float IndirectIrradiance; // 0..1
-				uint ShadingModelID;
-				uint SelectiveOutputMask;
-				float Depth;
+				uint ShadingModelID; // 0..15 
+				uint SelectiveOutputMask; // 0..255 
+				// in unreal units (linear), can be used to reconstruct world position,
+				// only valid when decoding the GBuffer as the value gets reconstructed from the Z buffer
+				float Depth; 
 			};
+
+			struct FShadowTerms
+			{
+				float	SurfaceShadow;
+				float	TransmissionShadow;
+				float	TransmissionThickness;
+				//FHairTransmittanceData HairTransmittance;
+			};
+
+			struct FCapsuleLight
+			{
+				float3	LightPos[2];
+				float	Length;
+				float	Radius;
+				float	SoftRadius;
+				float	DistBiasSqr;
+			};
+
+			struct FDeferredLightingSplit
+			{
+				float4 DiffuseLighting;
+				float4 SpecularLighting;
+			};
+
+			struct FDeferredLightData
+			{
+				float3 Direction;
+				float ContactShadowLength;
+				float4 ShadowMapChannelMask;
+				uint ShadowedBits;
+			};
+
+			struct FRectTexture
+			{
+				uint Dummy;
+			};
+
 
 			TEXTURE2D(_SSS); SAMPLER(sampler_SSS);
 			TEXTURE2D(_Depth); SAMPLER(sampler_Depth);
@@ -101,11 +141,17 @@
 
 			static float FrameId = 3; 
 			static bool bSubsurfacePostprocessEnabled = true;
-			const static float LightData_ShadowedBits = 3;
-			const static float LightData_ContactShadowLength = 0.2;
+
+			static FDeferredLightData kena_LightData = (FDeferredLightData)0;
+
+
+			//const static float LightData_ShadowedBits = 3;
+			//const static float LightData_ContactShadowLength = 0.2;
+			//static float3 light_direction = float3(0.51555, -0.29836, 0.80324); //光方向(指向光源) 
+			//static float4 LightData_ShadowMapChannelMask = float4(0,0,0,0);
+
 			static float4 screen_param = float4(1707, 960, 0.00059, 0.00104); 
-			static float3 light_direction = float3(0.51555, -0.29836, 0.80324); //光方向(指向光源) 
-			static float4 LightData_ShadowMapChannelMask = float4(0,0,0,0);
+
 			static float4 InvDeviceZToWorldZTransform = float4(0.00, 0.00, 0.10, -1.00000E-08); //CB0[65] 对应Unity的zBufferParams  
 			static float4 ScreenPositionScaleBias = float4(0.49971, -0.50, 0.50, 0.49971); //CB0[66] 从NDC变换到UV空间 
 			static float4 CameraPosWS = float4(-58625.35547, 27567.39453, -6383.71826, 0); //世界空间中摄像机的坐标值 
@@ -209,7 +255,10 @@
 				GBuffer.IndirectIrradiance = 1;   //环境光强没有波动 
 
 				//GBuffer.CustomDepth = 1; 
-				GBuffer.Depth = SceneDepth;
+				GBuffer.Depth = SceneDepth; 
+
+				//Kena里只有木+墙部分激活了 Skip_CustomData，其余部分均需要用到 Comp_F_R_X_I_Raw 这样用户定义的纹理和对应逻辑 
+				GBuffer.CustomData = (!(GBuffer.SelectiveOutputMask & SKIP_CUSTOMDATA_MASK)) ? Comp_F_R_X_I_Raw.xyzw : float4(0, 0, 0, 0);
 
 				UNITY_FLATTEN
 				if (GBuffer.ShadingModelID == SHADINGMODELID_EYE)
@@ -326,6 +375,85 @@
 			}
 
 
+			void GetShadowTerms(FGBufferData GBuffer, FDeferredLightData LightData, float3 WorldPosition,
+				float3 L, float4 LightAttenuation, float Dither, inout FShadowTerms Shadow)
+			{
+				const float ContactShadowLengthScreenScale = Matrix_Inv_P[1][1] * GBuffer.Depth;
+
+				uint2 flag = GBuffer.SelectiveOutputMask & uint2(SKIP_PRECSHADOW_MASK, ZERO_PRECSHADOW_MASK);
+				float PrecomputedShadowFactors = flag.y ? 0 : 1;
+				PrecomputedShadowFactors = flag.x ? PrecomputedShadowFactors : 1;
+
+				float UsesStaticShadowMap = dot(LightData.ShadowMapChannelMask, float4(1, 1, 1, 1));
+				float StaticShadowing = lerp(1, dot(PrecomputedShadowFactors, LightData.ShadowMapChannelMask), UsesStaticShadowMap);
+
+				float DynamicShadowFraction = DistanceFromCameraFade(GBuffer.Depth); //依据距离远近 
+
+				// For a directional light, fade between static shadowing and the whole scene dynamic shadowing based on distance + per object shadows
+				float SurfaceShadow = lerp(LightAttenuation.x, StaticShadowing, DynamicShadowFraction); //调和动态和静态阴影 
+				// Fade between SSS dynamic shadowing and static shadowing based on distance
+				float TransmissionShadow = min(lerp(LightAttenuation.y, StaticShadowing, DynamicShadowFraction), LightAttenuation.w);
+
+				SurfaceShadow *= LightAttenuation.z;
+				TransmissionShadow *= LightAttenuation.z;
+
+				float ContactShadowLength = 0;
+				UNITY_FLATTEN
+				if (LightData.ShadowedBits > 1 && LightData.ContactShadowLength > 0)
+				{
+					ContactShadowLength = LightData.ContactShadowLength * ContactShadowLengthScreenScale;
+				}
+
+				float StepOffset = Dither - 0.5;
+				float ContactShadow = ShadowRayCast(
+					WorldPosition - CameraPosWS.xyz,  //对应UE4源码: WorldPosition + View.PreViewTranslation 
+					L,
+					ContactShadowLength,
+					8,
+					StepOffset);
+
+				SurfaceShadow *= ContactShadow;
+
+				uint2 IsEyeHair = GBuffer.ShadingModelID == uint2(SHADINGMODELID_EYE, SHADINGMODELID_HAIR);
+				TransmissionShadow = IsEyeHair.y ?
+					TransmissionShadow * ContactShadow :
+					(IsEyeHair.x ? TransmissionShadow : TransmissionShadow * (ContactShadow * 0.5 + 0.5));
+
+				Shadow.SurfaceShadow = SurfaceShadow;
+				Shadow.TransmissionShadow = TransmissionShadow;
+			}
+
+
+			FDeferredLightingSplit GetDynamicLightingSplit(
+				float3 WorldPosition, float3 CameraVector, FGBufferData GBuffer, float AmbientOcclusion, uint ShadingModelID,
+				FDeferredLightData LightData, float4 LightAttenuation, float Dither, uint2 SVPos, FRectTexture SourceTexture,
+				inout float SurfaceShadow)
+			{
+				float3 V = -CameraVector;
+				float3 N = GBuffer.WorldNormal;
+
+				float3 L = LightData.Direction;	// Already normalized -> 这里是引擎提供的主光方向 
+				float3 ToLight = L;
+
+				float LightMask = 1;
+
+				//if (LightMask > 0)		//TRUE -> 假设任何位置都能被 RadialLight 照射到 
+				{
+					FShadowTerms Shadow = (FShadowTerms)0;
+					Shadow.SurfaceShadow = AmbientOcclusion;
+					Shadow.TransmissionShadow = 1;
+					Shadow.TransmissionThickness = 1;
+					//Shadow.HairTransmittance.Transmittance = 1; 
+					//Shadow.HairTransmittance.OpaqueVisibility = 1; //todo 
+					GetShadowTerms(GBuffer, LightData, WorldPosition, L, LightAttenuation, Dither, Shadow); 
+					SurfaceShadow = Shadow.SurfaceShadow;
+				}
+
+				FDeferredLightingSplit OUT = (FDeferredLightingSplit)0;
+				return OUT;
+			}
+
+
 			v2f vert(appdata IN)
 			{
 				v2f OUT = (v2f)0;
@@ -344,6 +472,13 @@
 
 			half4 frag(v2f IN) : SV_Target
 			{
+				//init all local buffer data
+				kena_LightData.ShadowedBits = 3;
+				kena_LightData.ContactShadowLength = 0.2;
+				kena_LightData.Direction = float3(0.51555, -0.29836, 0.80324);
+				kena_LightData.ShadowMapChannelMask = float4(0, 0, 0, 0);
+				//init done! 
+
 				half4 test = half4(0,0,0,1);  //用于测试输出 
 				//float tmp1 = 0;
 
@@ -355,7 +490,8 @@
 				{
 					//首先重构世界坐标 
 					half3 ViewDirWS = normalize(IN.viewDirWS);
-					float3 posWS = ViewDirWS * GBuffer.Depth + CameraPosWS.xyz;
+					float3 WorldPosition = ViewDirWS * GBuffer.Depth + CameraPosWS.xyz;
+					float3 CameraVector = normalize(WorldPosition - CameraPosWS.xyz);
 					//test.xyz = abs(posWS - CameraPosWS.xyz) / 35000; //用于验证世界坐标解码后的正确性 
 
 					//在一定屏幕空间范围内的随机变量，一般用于模糊摩尔纹或其他异样 
@@ -363,48 +499,22 @@
 
 					//get shadow terms
 					float4 LightAttenuation = GetPerPixelLightAttenuation(IN.uv);
-					const float ContactShadowLengthScreenScale = Matrix_Inv_P[1][1] * GBuffer.Depth;
 
-					uint2 flag = GBuffer.SelectiveOutputMask & uint2(SKIP_PRECSHADOW_MASK, ZERO_PRECSHADOW_MASK); 
-					float PrecomputedShadowFactors = flag.y ? 0 : 1;
-					PrecomputedShadowFactors = flag.x ? PrecomputedShadowFactors : 1;
+					//get ssao 
+					float AmbientOcclusion = SAMPLE_TEXTURE2D(_SSAO, sampler_SSAO, IN.uv).r;
 
-					float UsesStaticShadowMap = dot(LightData_ShadowMapChannelMask, float4(1, 1, 1, 1));
-					float StaticShadowing = lerp(1, dot(PrecomputedShadowFactors, LightData_ShadowMapChannelMask), UsesStaticShadowMap);
+					//get dumy rect texture 
+					FRectTexture SourceTexture = (FRectTexture)0;
 
-					float DynamicShadowFraction = DistanceFromCameraFade(GBuffer.Depth); //依据距离远近 
+					float SurfaceShadow = 1.0f;
 
-					// For a directional light, fade between static shadowing and the whole scene dynamic shadowing based on distance + per object shadows
-					float SurfaceShadow = lerp(LightAttenuation.x, StaticShadowing, DynamicShadowFraction); //调和动态和静态阴影 
-					// Fade between SSS dynamic shadowing and static shadowing based on distance
-					float TransmissionShadow = min(lerp(LightAttenuation.y, StaticShadowing, DynamicShadowFraction), LightAttenuation.w);
-					
-					SurfaceShadow *= LightAttenuation.z;
-					TransmissionShadow *= LightAttenuation.z;
+					FDeferredLightingSplit light_output = GetDynamicLightingSplit(
+						WorldPosition, CameraVector, GBuffer, AmbientOcclusion, GBuffer.ShadingModelID,
+						kena_LightData, LightAttenuation, Dither, uint2(IN.vertex.xy), SourceTexture,
+						SurfaceShadow
+					);
 
-					float ContactShadowLength = 0;
-					UNITY_FLATTEN
-					if (LightData_ShadowedBits > 1 && LightData_ContactShadowLength > 0)
-					{
-						ContactShadowLength = LightData_ContactShadowLength * ContactShadowLengthScreenScale; 
-					}
-
-					float StepOffset = Dither - 0.5;
-					float ContactShadow = ShadowRayCast(
-						posWS - CameraPosWS.xyz, 
-						light_direction, 
-						ContactShadowLength, 
-						8, 
-						StepOffset);
-
-					SurfaceShadow *= ContactShadow;
-
-					uint2 IsEyeHair = GBuffer.ShadingModelID == uint2(SHADINGMODELID_EYE, SHADINGMODELID_HAIR);
-					TransmissionShadow = IsEyeHair.y ? 
-						TransmissionShadow * ContactShadow : 
-						(IsEyeHair.x ? TransmissionShadow : TransmissionShadow * (ContactShadow * 0.5 + 0.5)); 
-
-					test.x = TransmissionShadow;
+					test.x = SurfaceShadow;
 
 					//test.x = CheckerFromSceneColorUV(IN.uv);
 
