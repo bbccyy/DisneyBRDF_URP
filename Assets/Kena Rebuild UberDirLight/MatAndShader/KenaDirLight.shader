@@ -114,12 +114,24 @@
 				float4 SpecularLighting;
 			};
 
+			struct FDirectLighting
+			{
+				float3	Diffuse;
+				float3	Specular;
+				float3	Transmission;
+			};
+
 			struct FDeferredLightData
 			{
 				float3 Direction;
+				float3 Tangent;
 				float ContactShadowLength;
 				float4 ShadowMapChannelMask;
 				uint ShadowedBits;
+				float SourceLength;
+				float SourceRadius;
+				float SoftSourceRadius;
+				bool bInverseSquared;
 			};
 
 			struct FRectTexture
@@ -179,6 +191,17 @@
 				float4(0,			0,			1,		0)
 				);
 
+			FCapsuleLight GetCapsule(float3 ToLight, FDeferredLightData LightData)
+			{
+				FCapsuleLight Capsule;
+				Capsule.Length = LightData.SourceLength;
+				Capsule.Radius = LightData.SourceRadius;
+				Capsule.SoftRadius = LightData.SoftSourceRadius;
+				Capsule.DistBiasSqr = 1;
+				Capsule.LightPos[0] = ToLight - 0.5 * Capsule.Length * LightData.Tangent;
+				Capsule.LightPos[1] = ToLight + 0.5 * Capsule.Length * LightData.Tangent;
+				return Capsule;
+			}
 
 			bool UseSubsurfaceProfile(int ShadingModel)
 			{
@@ -205,7 +228,6 @@
 				SpecularColor *= !bChecker;
 				Specular *= !bChecker;
 			}
-
 
 			float3 DecodeNormal(float3 N)
 			{
@@ -374,7 +396,6 @@
 				return 1 - Shadow;
 			}
 
-
 			void GetShadowTerms(FGBufferData GBuffer, FDeferredLightData LightData, float3 WorldPosition,
 				float3 L, float4 LightAttenuation, float Dither, inout FShadowTerms Shadow)
 			{
@@ -423,7 +444,34 @@
 				Shadow.TransmissionShadow = TransmissionShadow;
 			}
 
+			FDirectLighting IntegrateBxDF(FGBufferData GBuffer, half3 N, half3 V, FCapsuleLight Capsule, 
+				FShadowTerms Shadow, bool bInverseSquared)
+			{
+				float NoL = 0;
+				float Falloff = 0;
+				float LineCosSubtended = 1;
 
+				if (Capsule.Length <= 0 ) // -> Kena 的CapsuleLight.len总是为0
+				{
+					float DistSqr = dot(Capsule.LightPos[0], Capsule.LightPos[0]); //LightPos里存的其实是LightDir 
+					Falloff = rcp(DistSqr + Capsule.DistBiasSqr);	//todo  
+					float3 L = Capsule.LightPos[0] * rsqrt(DistSqr);  //可以直接拿Capsule.LightPos[0]替代，Kena中，这个值本身已经被归一化了 
+					NoL = dot(N, L);
+				}
+
+				if (Capsule.Radius > 0)
+				{
+					// TODO Use capsule area?
+					float SinAlphaSqr = saturate(Pow2(Capsule.Radius) * Falloff);
+					NoL = SphereHorizonCosWrap(NoL, SinAlphaSqr);
+				}
+
+
+				FDirectLighting BxDF_output = (FDirectLighting)0; 
+				return BxDF_output;
+			}
+
+			/** Calculates lighting for a given position, normal, etc with a fully featured lighting model designed for quality. */ 
 			FDeferredLightingSplit GetDynamicLightingSplit(
 				float3 WorldPosition, float3 CameraVector, FGBufferData GBuffer, float AmbientOcclusion, uint ShadingModelID,
 				FDeferredLightData LightData, float4 LightAttenuation, float Dither, uint2 SVPos, FRectTexture SourceTexture,
@@ -446,7 +494,24 @@
 					//Shadow.HairTransmittance.Transmittance = 1; 
 					//Shadow.HairTransmittance.OpaqueVisibility = 1; //todo 
 					GetShadowTerms(GBuffer, LightData, WorldPosition, L, LightAttenuation, Dither, Shadow); 
-					SurfaceShadow = Shadow.SurfaceShadow;
+					SurfaceShadow = Shadow.SurfaceShadow; 
+
+					UNITY_BRANCH
+					if (Shadow.SurfaceShadow + Shadow.TransmissionShadow > 0)  //不处于完全黑暗的地方，都需要计算光照！ 
+					{
+						//todo 
+						// const bool bNeedsSeparateSubsurfaceLightAccumulation = UseSubsurfaceProfile(GBuffer.ShadingModelID);
+						// float3 LightColor = LightData.Color;
+						
+						// Kena 进入 ~NON_DIRECTIONAL_DIRECT_LIGHTING 分支，既，有直接光
+						FDirectLighting Lighting;
+						//Kena 进入 Capsule light 分支 
+						FCapsuleLight Capsule = GetCapsule(ToLight, LightData);
+						Lighting = IntegrateBxDF(GBuffer, N, V, Capsule, Shadow, LightData.bInverseSquared);
+
+					}
+
+
 				}
 
 				FDeferredLightingSplit OUT = (FDeferredLightingSplit)0;
@@ -473,10 +538,16 @@
 			half4 frag(v2f IN) : SV_Target
 			{
 				//init all local buffer data
-				kena_LightData.ShadowedBits = 3;
-				kena_LightData.ContactShadowLength = 0.2;
-				kena_LightData.Direction = float3(0.51555, -0.29836, 0.80324);
-				kena_LightData.ShadowMapChannelMask = float4(0, 0, 0, 0);
+				kena_LightData.ShadowedBits = 3;		  //cb1[2].x=3 -> 需用uint4查看 
+				kena_LightData.ContactShadowLength = 0.2; //cb1[1].z=0.2 
+				kena_LightData.Direction = float3(0.51555, -0.29836, 0.80324);  //cb1[5].xyz
+				kena_LightData.Tangent = float3(0.51555, -0.29836, 0.80324);    //cb1[6].xyz
+				kena_LightData.ShadowMapChannelMask = float4(0, 0, 0, 0);	    //cb1[0].xyzw 
+				kena_LightData.SourceLength = 0;		//cb1[7].w=0
+				kena_LightData.SourceRadius = 0.00467;	//cb1[6].w=0.00467
+				kena_LightData.SoftSourceRadius = 0;	//todo 
+				kena_LightData.bInverseSquared = true;	//todo  uint4
+				//LightColor -> 推测为 cb1[4].rgb 
 				//init done! 
 
 				half4 test = half4(0,0,0,1);  //用于测试输出 
