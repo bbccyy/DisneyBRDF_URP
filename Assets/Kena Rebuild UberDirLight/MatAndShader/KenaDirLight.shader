@@ -42,7 +42,14 @@
 			#define SHADINGMODELID_SINGLELAYERWATER		10
 			#define SHADINGMODELID_THIN_TRANSLUCENT		11
 			#define SHADINGMODELID_NUM					12
-			#define SHADINGMODELID_MASK					0xF		// 4 bits reserved for ShadingModelID		
+			#define SHADINGMODELID_MASK					0xF		// 4 bits reserved for ShadingModelID	
+
+			// The flags are defined so that 0 value has no effect!
+			// These occupy the 4 high bits in the same channel as the SHADINGMODELID_*
+			#define SKIP_CUSTOMDATA_MASK			(1 << 4)	// TODO remove. Can be inferred from shading model.
+			#define SKIP_PRECSHADOW_MASK			(1 << 5)
+			#define ZERO_PRECSHADOW_MASK			(1 << 6)
+			#define SKIP_VELOCITY_MASK				(1 << 7)
 
 			struct appdata
 			{
@@ -73,8 +80,11 @@
 				float3 BaseColor;
 				float Metallic; // 0..1
 				float Specular; // 0..1
-				float Roughness;
+				float Roughness; // 0..1
+				float GBufferAO; // 0..1
+				float IndirectIrradiance; // 0..1
 				uint ShadingModelID;
+				uint SelectiveOutputMask;
 				float Depth;
 			};
 
@@ -90,6 +100,7 @@
 
 
 			static float FrameId = 3; 
+			static bool bSubsurfacePostprocessEnabled = true;
 			const static float LightData_ShadowedBits = 3;
 			const static float LightData_ContactShadowLength = 0.2;
 			static float4 screen_param = float4(1707, 960, 0.00059, 0.00104); 
@@ -123,6 +134,38 @@
 				);
 
 
+			bool UseSubsurfaceProfile(int ShadingModel)
+			{
+				return ShadingModel == SHADINGMODELID_SUBSURFACE_PROFILE || ShadingModel == SHADINGMODELID_EYE;
+			}
+
+			float DielectricSpecularToF0(float Specular)
+			{
+				return 0.08f * Specular;
+			}
+
+			float3 ComputeF0(float Specular, float3 BaseColor, float Metallic)
+			{
+				return lerp(DielectricSpecularToF0(Specular).xxx, BaseColor, Metallic.xxx);
+			}
+
+			void AdjustBaseColorAndSpecularColorForSubsurfaceProfileLighting(inout float3 BaseColor, inout float3 SpecularColor, inout float Specular, bool bChecker)
+			{
+				// because we adjust the BaseColor here, we need StoredBaseColor
+				BaseColor = bSubsurfacePostprocessEnabled ? float3(1, 1, 1) : BaseColor;
+				// we apply the base color later in SubsurfaceRecombinePS()
+				BaseColor = bChecker;
+				// in SubsurfaceRecombinePS() does not multiply with Specular so we do it here
+				SpecularColor *= !bChecker;
+				Specular *= !bChecker;
+			}
+
+
+			float3 DecodeNormal(float3 N)
+			{
+				return N * 2 - 1;
+			}
+
 			bool CheckerFromSceneColorUV(float2 UVSceneColor)
 			{
 				// relative to left top of the rendertarget (not viewport)
@@ -136,25 +179,62 @@
 				return ((uint)round(InPackedChannel * (float)0xFF)) & SHADINGMODELID_MASK;
 			}
 
+			uint DecodeSelectiveOutputMask(float InPackedChannel)
+			{
+				return ((uint)round(InPackedChannel * (float)0xFF)) & ~SHADINGMODELID_MASK;
+			}
+
 			float ConvertFromDeviceZ(float DeviceZ)
 			{
 				// Supports ortho and perspective, see CreateInvDeviceZToWorldZTransform()
 				return DeviceZ * InvDeviceZToWorldZTransform[0] + InvDeviceZToWorldZTransform[1] + 1.0f / (DeviceZ * InvDeviceZToWorldZTransform[2] - InvDeviceZToWorldZTransform[3]);
 			}
 
-			FGBufferData DecodeGBufferData(float3 Normal_Raw, float4 Albedo_Raw, float4 Comp_M_D_R_F_Raw, float4 Comp_F_R_X_I_Raw, float4 ShadowTex_Raw, float SceneDepth)
+			FGBufferData DecodeGBufferData(float3 Normal_Raw, float4 Albedo_Raw, float4 Comp_M_D_R_F_Raw, 
+				float4 Comp_F_R_X_I_Raw, float4 ShadowTex_Raw, float SceneDepth, bool bChecker)
 			{
-				FGBufferData Out = (FGBufferData)0;
+				FGBufferData GBuffer = (FGBufferData)0;
 
+				GBuffer.WorldNormal = normalize(DecodeNormal(Normal_Raw));
+				GBuffer.Metallic = Comp_M_D_R_F_Raw.r;
+				GBuffer.Specular = Comp_M_D_R_F_Raw.g;
+				GBuffer.Roughness = Comp_M_D_R_F_Raw.b;
 
+				GBuffer.ShadingModelID = DecodeShadingModelId(Comp_M_D_R_F_Raw.a);
+				GBuffer.SelectiveOutputMask = DecodeSelectiveOutputMask(Comp_M_D_R_F_Raw.a);
 
+				GBuffer.BaseColor = Albedo_Raw.rgb; 
 
-				return Out;
+				GBuffer.GBufferAO = Albedo_Raw.a; //非 static_lighting 模式下，使用传入的a通道作为 GBufferAO 
+				GBuffer.IndirectIrradiance = 1;   //环境光强没有波动 
+
+				//GBuffer.CustomDepth = 1; 
+				GBuffer.Depth = SceneDepth;
+
+				UNITY_FLATTEN
+				if (GBuffer.ShadingModelID == SHADINGMODELID_EYE)
+				{
+					GBuffer.Metallic = 0.0; 
+				}
+
+				// derived from BaseColor, Metalness, Specular
+				{
+					GBuffer.SpecularColor = ComputeF0(GBuffer.Specular, GBuffer.BaseColor, GBuffer.Metallic);
+
+					if (UseSubsurfaceProfile(GBuffer.ShadingModelID)) //对皮肤和眼睛来说，会进入此分支 
+					{
+						AdjustBaseColorAndSpecularColorForSubsurfaceProfileLighting(GBuffer.BaseColor,
+							GBuffer.SpecularColor, GBuffer.Specular, bChecker);
+					}
+
+					GBuffer.DiffuseColor = GBuffer.BaseColor - GBuffer.BaseColor * GBuffer.Metallic;
+				}
+
+				return GBuffer;
 			}
 
 			FGBufferData GetGBufferData(float2 UV, bool bGetNormalizedNormal = true)
 			{
-				FGBufferData Out = (FGBufferData)0;
 				float DeviceZ = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, UV).r;
 				float3 Normal_Raw = SAMPLE_TEXTURE2D(_Normal, sampler_Normal, UV).xyz;
 				float4 Albedo_Raw = SAMPLE_TEXTURE2D(_Albedo, sampler_Albedo, UV).xyzw;
@@ -164,7 +244,8 @@
 
 				float SceneDepth = ConvertFromDeviceZ(DeviceZ);
 
-				return DecodeGBufferData(Normal_Raw, Albedo_Raw, Comp_M_D_R_F_Raw, Comp_F_R_X_I_Raw, ShadowTex_Raw, SceneDepth);
+				return DecodeGBufferData(Normal_Raw, Albedo_Raw, Comp_M_D_R_F_Raw, 
+					Comp_F_R_X_I_Raw, ShadowTex_Raw, SceneDepth, CheckerFromSceneColorUV(UV));
 			}
 
 			float InterleavedGradientNoise(float2 uv, float frameId)
@@ -264,39 +345,34 @@
 			half4 frag(v2f IN) : SV_Target
 			{
 				half4 test = half4(0,0,0,1);  //用于测试输出 
-				float tmp1 = 0;
+				//float tmp1 = 0;
 
-				//采样Comp，提取Flag位 
-				half4 comp_m_d_r_f = SAMPLE_TEXTURE2D(_Comp_M_D_R_F, sampler_Comp_M_D_R_F, IN.uv);
+				FGBufferData GBuffer = GetGBufferData(IN.uv);
+				
+				//uint see_flag = GBuffer.ShadingModelID == (uint)5; //(0)显示天空,此外(9)眼, (8)衣服,(7)头发,(5)皮肤,(6)草,(1)木等 
 
-				uint raw_flag = (uint)round(comp_m_d_r_f.w * 0xFF); // Decode ShadingModelId
-				uint mat_type = raw_flag & SHADINGMODELID_MASK; 
-				//uint see_flag = mat_type == (uint)8; //(0)显示天空,此外(9)眼, (8)衣服,(7)头发,(5)皮肤,(6)草,(1)木等 
-
-				if (mat_type)  //不是天空的进入 
+				if (GBuffer.ShadingModelID)  //不是天空的进入 
 				{
 					//首先重构世界坐标 
-					float deviceZ = SAMPLE_TEXTURE2D(_Depth, sampler_Depth, IN.uv);
-					float sceneDepth = deviceZ * InvDeviceZToWorldZTransform[0] + InvDeviceZToWorldZTransform[1] + 1.0 / (deviceZ * InvDeviceZToWorldZTransform[2] - InvDeviceZToWorldZTransform[3]);
 					half3 ViewDirWS = normalize(IN.viewDirWS);
-					float3 posWS = ViewDirWS * sceneDepth + CameraPosWS.xyz;
-					test.xyz = abs(posWS - CameraPosWS.xyz) / 35000; //用于验证世界坐标解码后的正确性 
+					float3 posWS = ViewDirWS * GBuffer.Depth + CameraPosWS.xyz;
+					//test.xyz = abs(posWS - CameraPosWS.xyz) / 35000; //用于验证世界坐标解码后的正确性 
 
 					//在一定屏幕空间范围内的随机变量，一般用于模糊摩尔纹或其他异样 
 					float Dither = InterleavedGradientNoise(IN.vertex, FrameId); 
 
 					//get shadow terms
 					float4 LightAttenuation = GetPerPixelLightAttenuation(IN.uv);
-					const float ContactShadowLengthScreenScale = Matrix_Inv_P[1][1] * sceneDepth;
+					const float ContactShadowLengthScreenScale = Matrix_Inv_P[1][1] * GBuffer.Depth;
 
-					uint2 flag = raw_flag.xx & uint2(32, 64);
+					uint2 flag = GBuffer.SelectiveOutputMask & uint2(SKIP_PRECSHADOW_MASK, ZERO_PRECSHADOW_MASK); 
 					float PrecomputedShadowFactors = flag.y ? 0 : 1;
 					PrecomputedShadowFactors = flag.x ? PrecomputedShadowFactors : 1;
 
 					float UsesStaticShadowMap = dot(LightData_ShadowMapChannelMask, float4(1, 1, 1, 1));
 					float StaticShadowing = lerp(1, dot(PrecomputedShadowFactors, LightData_ShadowMapChannelMask), UsesStaticShadowMap);
 
-					float DynamicShadowFraction = DistanceFromCameraFade(sceneDepth); //依据距离远近 
+					float DynamicShadowFraction = DistanceFromCameraFade(GBuffer.Depth); //依据距离远近 
 
 					// For a directional light, fade between static shadowing and the whole scene dynamic shadowing based on distance + per object shadows
 					float SurfaceShadow = lerp(LightAttenuation.x, StaticShadowing, DynamicShadowFraction); //调和动态和静态阴影 
@@ -323,12 +399,12 @@
 
 					SurfaceShadow *= ContactShadow;
 
-					uint2 IsEyeHair = mat_type.xx == uint2(9, 7);
+					uint2 IsEyeHair = GBuffer.ShadingModelID == uint2(SHADINGMODELID_EYE, SHADINGMODELID_HAIR);
 					TransmissionShadow = IsEyeHair.y ? 
 						TransmissionShadow * ContactShadow : 
 						(IsEyeHair.x ? TransmissionShadow : TransmissionShadow * (ContactShadow * 0.5 + 0.5)); 
 
-					//test.x = SurfaceShadow;
+					test.x = TransmissionShadow;
 
 					//test.x = CheckerFromSceneColorUV(IN.uv);
 
