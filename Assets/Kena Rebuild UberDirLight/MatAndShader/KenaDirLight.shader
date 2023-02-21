@@ -139,6 +139,17 @@
 				uint Dummy;
 			};
 
+			struct FAreaLight
+			{
+				float		SphereSinAlpha;
+				float		SphereSinAlphaSoft;
+				float		LineCosSubtended;
+				float3		FalloffColor;
+				//FRect		Rect;
+				//FRectTexture Texture;
+				bool		bIsRect;
+			};
+
 
 			TEXTURE2D(_SSS); SAMPLER(sampler_SSS);
 			TEXTURE2D(_Depth); SAMPLER(sampler_Depth);
@@ -151,19 +162,18 @@
 			TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
 
 
+			inline float Pow2(float a)
+			{
+				return a * a;
+			}
+
+
 			static float FrameId = 3; 
 			static bool bSubsurfacePostprocessEnabled = true;
-
 			static FDeferredLightData kena_LightData = (FDeferredLightData)0;
 
-
-			//const static float LightData_ShadowedBits = 3;
-			//const static float LightData_ContactShadowLength = 0.2;
-			//static float3 light_direction = float3(0.51555, -0.29836, 0.80324); //光方向(指向光源) 
-			//static float4 LightData_ShadowMapChannelMask = float4(0,0,0,0);
-
 			static float4 screen_param = float4(1707, 960, 0.00059, 0.00104); 
-
+			static float view_minRoughness = 0.02; //cb0[219].y 
 			static float4 InvDeviceZToWorldZTransform = float4(0.00, 0.00, 0.10, -1.00000E-08); //CB0[65] 对应Unity的zBufferParams  
 			static float4 ScreenPositionScaleBias = float4(0.49971, -0.50, 0.50, 0.49971); //CB0[66] 从NDC变换到UV空间 
 			static float4 CameraPosWS = float4(-58625.35547, 27567.39453, -6383.71826, 0); //世界空间中摄像机的坐标值 
@@ -201,6 +211,37 @@
 				Capsule.LightPos[0] = ToLight - 0.5 * Capsule.Length * LightData.Tangent;
 				Capsule.LightPos[1] = ToLight + 0.5 * Capsule.Length * LightData.Tangent;
 				return Capsule;
+			}
+
+			// Alpha is half of angle of spherical cap
+			float SphereHorizonCosWrap(float NoL, float SinAlphaSqr)
+			{
+				float SinAlpha = sqrt(SinAlphaSqr);
+				if (NoL < SinAlpha)
+				{
+					NoL = max(NoL, -SinAlpha);
+					// Hermite spline approximation
+					// Fairly accurate with SinAlpha < 0.8
+					// y=0 and dy/dx=0 at -SinAlpha
+					// y=SinAlpha and dy/dx=1 at SinAlpha
+					NoL = Pow2(SinAlpha + NoL) / (4 * SinAlpha);
+				}
+				return NoL;
+			}
+
+			// Closest point on line segment to ray
+			float3 ClosestPointLineToRay(float3 Line0, float3 Line1, float Length, float3 R)
+			{
+				float3 L0 = Line0;
+				float3 L1 = Line1;
+				float3 Line01 = Line1 - Line0;
+
+				// Shortest distance
+				float A = Pow2(Length);
+				float B = dot(R, Line01);
+				float t = saturate(dot(Line0, B * R - Line01) / (A - B * B));
+
+				return Line0 + t * Line01;
 			}
 
 			bool UseSubsurfaceProfile(int ShadingModel)
@@ -444,14 +485,58 @@
 				Shadow.TransmissionShadow = TransmissionShadow;
 			}
 
+			FDirectLighting DefaultLitBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
+			{
+
+
+				FDirectLighting Lighting;
+
+
+
+				return Lighting;
+			}
+
+			FDirectLighting IntegrateBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, 
+				float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
+			{
+				switch (GBuffer.ShadingModelID)
+				{
+				case SHADINGMODELID_DEFAULT_LIT:
+				case SHADINGMODELID_SINGLELAYERWATER:
+				case SHADINGMODELID_THIN_TRANSLUCENT:
+					//return DefaultLitBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+					return DefaultLitBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+				case SHADINGMODELID_SUBSURFACE:
+					//return SubsurfaceBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+				case SHADINGMODELID_PREINTEGRATED_SKIN:
+					//return PreintegratedSkinBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+				case SHADINGMODELID_CLEAR_COAT:
+					//return ClearCoatBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+				case SHADINGMODELID_SUBSURFACE_PROFILE:
+					//return SubsurfaceProfileBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+				case SHADINGMODELID_TWOSIDED_FOLIAGE:
+					//return TwoSidedBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+					//TODO 
+				case SHADINGMODELID_HAIR:
+					//return HairBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+				case SHADINGMODELID_CLOTH:
+					//return ClothBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+				case SHADINGMODELID_EYE:
+					//return EyeBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+					return (FDirectLighting)0;
+				default:
+					return (FDirectLighting)0;
+				}
+			}
+
 			FDirectLighting IntegrateBxDF(FGBufferData GBuffer, half3 N, half3 V, FCapsuleLight Capsule, 
 				FShadowTerms Shadow, bool bInverseSquared)
 			{
 				float NoL = 0;
 				float Falloff = 0;
-				float LineCosSubtended = 1;
+				float LineCosSubtended = 1; 
 
-				if (Capsule.Length <= 0 ) // -> Kena 的CapsuleLight.len总是为0
+				if (Capsule.Length <= 0 ) // -> Kena 的CapsuleLight.len总是为0 
 				{
 					float DistSqr = dot(Capsule.LightPos[0], Capsule.LightPos[0]); //LightPos里存的其实是LightDir 
 					Falloff = rcp(DistSqr + Capsule.DistBiasSqr);	//todo  
@@ -461,14 +546,34 @@
 
 				if (Capsule.Radius > 0)
 				{
-					// TODO Use capsule area?
-					float SinAlphaSqr = saturate(Pow2(Capsule.Radius) * Falloff);
-					NoL = SphereHorizonCosWrap(NoL, SinAlphaSqr);
+					float SinAlphaSqr = saturate(Pow2(Capsule.Radius) * Falloff); //todo: 含义 
+					NoL = SphereHorizonCosWrap(NoL, SinAlphaSqr); 
 				}
 
+				NoL = saturate(NoL);
+				Falloff = bInverseSquared ? Falloff : 1;
 
-				FDirectLighting BxDF_output = (FDirectLighting)0; 
-				return BxDF_output;
+				float3 ToLight = Capsule.LightPos[0];
+				//if (Capsule.Length > 0) //当前分支不进入，Capsule.Length == 0 
+				//{
+				//	float3 R = reflect(-V, N);   
+				//	ToLight = ClosestPointLineToRay(Capsule.LightPos[0], Capsule.LightPos[1], Capsule.Length, R);
+				//}
+				float DistSqr = dot(ToLight, ToLight);
+				float InvDist = rsqrt(DistSqr);
+				float3 L = ToLight * InvDist;
+
+				GBuffer.Roughness = max(GBuffer.Roughness, view_minRoughness);
+				float a = Pow2(GBuffer.Roughness);
+
+				FAreaLight AreaLight;
+				AreaLight.SphereSinAlpha = saturate(Capsule.Radius * InvDist * (1 - a));
+				AreaLight.SphereSinAlphaSoft = saturate(Capsule.SoftRadius * InvDist);
+				AreaLight.LineCosSubtended = LineCosSubtended;
+				AreaLight.FalloffColor = 1;
+				AreaLight.bIsRect = false;
+
+				return IntegrateBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 			}
 
 			/** Calculates lighting for a given position, normal, etc with a fully featured lighting model designed for quality. */ 
@@ -545,7 +650,7 @@
 				kena_LightData.ShadowMapChannelMask = float4(0, 0, 0, 0);	    //cb1[0].xyzw 
 				kena_LightData.SourceLength = 0;		//cb1[7].w=0
 				kena_LightData.SourceRadius = 0.00467;	//cb1[6].w=0.00467
-				kena_LightData.SoftSourceRadius = 0;	//todo 
+				kena_LightData.SoftSourceRadius = 0;	//cb1[7].z=0 
 				kena_LightData.bInverseSquared = true;	//todo  uint4
 				//LightColor -> 推测为 cb1[4].rgb 
 				//init done! 
