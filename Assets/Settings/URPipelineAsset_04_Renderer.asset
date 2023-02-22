@@ -55,5 +55,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cbf74b1009ac5ac449e55df3b687a1da, type: 3}
   m_Name: NewSimpleFullScreenBlit
   m_EditorClassIdentifier: 
-  m_Active: 1
+  m_Active: 0
   kena_GI: {fileID: 2100000, guid: 67e32f826a5be8244843bf714ef51c70, type: 2}

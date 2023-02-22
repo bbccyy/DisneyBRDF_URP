@@ -125,6 +125,7 @@
 			struct FDeferredLightData
 			{
 				float3 Direction;
+				float4 Color;
 				float3 Tangent;
 				float ContactShadowLength;
 				float4 ShadowMapChannelMask;
@@ -133,6 +134,7 @@
 				float SourceRadius;
 				float SoftSourceRadius;
 				bool bInverseSquared;
+				float SpecularScale;
 			};
 
 			struct FRectTexture
@@ -813,18 +815,22 @@
 						// float3 LightColor = LightData.Color;
 						
 						// Kena 进入 ~NON_DIRECTIONAL_DIRECT_LIGHTING 分支，既，有直接光
-						FDirectLighting Lighting;
+						FDirectLighting Lighting; 
 						//Kena 进入 Capsule light 分支 
-						FCapsuleLight Capsule = GetCapsule(ToLight, LightData);
-						Lighting = IntegrateBxDF(GBuffer, N, V, Capsule, Shadow, LightData.bInverseSquared);
+						FCapsuleLight Capsule = GetCapsule(ToLight, LightData); 
+						Lighting = IntegrateBxDF(GBuffer, N, V, Capsule, Shadow, LightData.bInverseSquared); 
 
 						Lighting.Specular *= LightData.SpecularScale;
+
+						//LightData.Color* LightMask* Shadow.SurfaceShadow;
 
 					}
 					
 
 				}
 
+				//float4 DiffuseLighting;
+				//float4 SpecularLighting;
 				FDeferredLightingSplit OUT = (FDeferredLightingSplit)0;
 				return OUT;
 			}
@@ -858,7 +864,8 @@
 				kena_LightData.SourceRadius = 0.00467;	//cb1[6].w=0.00467
 				kena_LightData.SoftSourceRadius = 0;	//cb1[7].z=0 
 				kena_LightData.bInverseSquared = true;	//todo  uint4
-				//LightColor -> 推测为 cb1[4].rgb 
+				kena_LightData.SpecularScale = 1;		//cb1[5].w=1.0     
+				kena_LightData.Color = float4(17.99882, 18.66276, 19.00, 0.00);	//cb1[5].w=1.0     
 				//init done! 
 
 				half4 test = half4(0,0,0,1);  //用于测试输出 
