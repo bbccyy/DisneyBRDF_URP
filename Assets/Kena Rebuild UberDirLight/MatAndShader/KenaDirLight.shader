@@ -677,7 +677,6 @@
 
 			FDirectLighting DefaultLitBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
 			{
-
 				BxDFContext Context = (BxDFContext)0;
 				Context.NoL = dot(N, L);
 				Context.NoV = dot(N, V);
@@ -756,7 +755,7 @@
 				}
 
 				NoL = saturate(NoL);
-				Falloff = bInverseSquared ? Falloff : 1;
+				Falloff = bInverseSquared ? Falloff : 1; //todo 确认 bInverseSquared
 
 				float3 ToLight = Capsule.LightPos[0];
 				//if (Capsule.Length > 0) //当前分支不进入，Capsule.Length == 0 
@@ -819,8 +818,10 @@
 						FCapsuleLight Capsule = GetCapsule(ToLight, LightData);
 						Lighting = IntegrateBxDF(GBuffer, N, V, Capsule, Shadow, LightData.bInverseSquared);
 
-					}
+						Lighting.Specular *= LightData.SpecularScale;
 
+					}
+					
 
 				}
 
