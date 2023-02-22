@@ -198,9 +198,15 @@
 				return asfloat(i);
 			}
 
+			float Luminance(float3 aColor)
+			{
+				return dot(aColor, float3(0.3, 0.59, 0.11));
+			}
+
 
 			static float FrameId = 3; 
 			static bool bSubsurfacePostprocessEnabled = true;
+			static uint bCheckerboardSubsurfaceProfileRendering = 1;
 			static FDeferredLightData kena_LightData = (FDeferredLightData)0;
 
 			static float4 screen_param = float4(1707, 960, 0.00059, 0.00104); 
@@ -687,7 +693,7 @@
 				SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
 				Context.NoV = saturate(abs(Context.NoV) + 1e-5); 
 
-				FDirectLighting Lighting;
+				FDirectLighting Lighting = (FDirectLighting)0;
 				//原式: Lighting.Diffuse  = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_Lambert( GBuffer.DiffuseColor ); 
 				Lighting.Diffuse = Diffuse_Lambert(GBuffer.DiffuseColor * NoL); 
 
@@ -796,6 +802,9 @@
 
 				float LightMask = 1;
 
+				float4 RetDiffuse = 0;
+				float4 RetSpecular = 0;
+
 				//if (LightMask > 0)		//TRUE -> 假设任何位置都能被 RadialLight 照射到 
 				{
 					FShadowTerms Shadow = (FShadowTerms)0;
@@ -820,18 +829,31 @@
 						FCapsuleLight Capsule = GetCapsule(ToLight, LightData); 
 						Lighting = IntegrateBxDF(GBuffer, N, V, Capsule, Shadow, LightData.bInverseSquared); 
 
-						Lighting.Specular *= LightData.SpecularScale;
+						
+						float3 CommonMultiplier = LightData.Color * LightMask * Shadow.SurfaceShadow;
+						
 
-						//LightData.Color* LightMask* Shadow.SurfaceShadow;
+						RetDiffuse.rgb = Lighting.Diffuse * CommonMultiplier;
+						float3 ShadowTerm = Shadow.TransmissionShadow * LightData.Color * Lighting.Transmission;
 
+						if (UseSubsurfaceProfile(GBuffer.ShadingModelID) && bCheckerboardSubsurfaceProfileRendering == 0)
+						{
+							RetDiffuse.a = Luminance(RetDiffuse.rgb);
+							RetDiffuse.a += Luminance(ShadowTerm);
+						}
+
+
+						RetDiffuse.rgb += ShadowTerm;
+						RetSpecular.rgb = Lighting.Specular * LightData.SpecularScale * CommonMultiplier;
+						RetSpecular.a = 0;
 					}
-					
-
 				}
 
-				//float4 DiffuseLighting;
-				//float4 SpecularLighting;
 				FDeferredLightingSplit OUT = (FDeferredLightingSplit)0;
+
+				OUT.DiffuseLighting = RetDiffuse;
+				OUT.SpecularLighting = RetSpecular;
+
 				return OUT;
 			}
 
@@ -869,6 +891,7 @@
 				//init done! 
 
 				half4 test = half4(0,0,0,1);  //用于测试输出 
+				half4 FinalColor = half4(0,0,0,1);  //用于测试输出 
 				//float tmp1 = 0;
 
 				FGBufferData GBuffer = GetGBufferData(IN.uv);
@@ -903,15 +926,17 @@
 						SurfaceShadow
 					);
 
-					test.x = SurfaceShadow;
+					FinalColor = light_output.DiffuseLighting + light_output.SpecularLighting;
 
-					//test.x = CheckerFromSceneColorUV(IN.uv);
+					//test.x = SurfaceShadow;
+
+					test = FinalColor;
 
 				}
 				
 
 
-				return half4(test.xxx, 1);
+				return half4(test.rgb, test.a);
 			}
 
 			ENDHLSL
