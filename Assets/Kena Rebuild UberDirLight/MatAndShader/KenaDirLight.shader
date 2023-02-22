@@ -25,7 +25,7 @@
 			#pragma vertex vert
 			#pragma fragment frag
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-			#define _pi 3.141593f 
+			#define PI 3.141593f 
 
 			//@ShadingCommon 
 			// SHADINGMODELID_* occupy the 4 low bits of an 8bit channel and SKIP_* occupy the 4 high bits
@@ -86,6 +86,7 @@
 				float IndirectIrradiance; // 0..1
 				uint ShadingModelID; // 0..15 
 				uint SelectiveOutputMask; // 0..255 
+				float Anisotropy;
 				// in unreal units (linear), can be used to reconstruct world position,
 				// only valid when decoding the GBuffer as the value gets reconstructed from the Z buffer
 				float Depth; 
@@ -179,6 +180,22 @@
 				return a * a;
 			}
 
+			inline float Pow5(float x)
+			{
+				float xx = x * x;
+				return xx * xx * x;
+			}
+
+			// Relative error : < 0.7% over full
+			// Precise format : ~small float
+			// 1 ALU
+			float sqrtFast(float x)
+			{
+				int i = asint(x);
+				i = 0x1FBD1DF5 + (i >> 1);
+				return asfloat(i);
+			}
+
 
 			static float FrameId = 3; 
 			static bool bSubsurfacePostprocessEnabled = true;
@@ -223,6 +240,105 @@
 				Capsule.LightPos[0] = ToLight - 0.5 * Capsule.Length * LightData.Tangent;
 				Capsule.LightPos[1] = ToLight + 0.5 * Capsule.Length * LightData.Tangent;
 				return Capsule;
+			}
+
+			float3 Diffuse_Lambert(float3 DiffuseColor)
+			{
+				return DiffuseColor * (1 / PI);
+			}
+
+			float New_a2(float a2, float SinAlpha, float VoH)
+			{
+				return a2 + 0.25 * SinAlpha * (3.0 * sqrtFast(a2) + SinAlpha) / (VoH + 0.001);
+				//return a2 + 0.25 * SinAlpha * ( saturate(12 * a2 + 0.125) + SinAlpha ) / ( VoH + 0.001 );
+				//return a2 + 0.25 * SinAlpha * ( a2 * 2 + 1 + SinAlpha ) / ( VoH + 0.001 );
+			}
+
+			float EnergyNormalization(inout float a2, float VoH, FAreaLight AreaLight)
+			{
+				if (AreaLight.SphereSinAlphaSoft > 0)
+				{
+					// Modify Roughness
+					a2 = saturate(a2 + Pow2(AreaLight.SphereSinAlphaSoft) / (VoH * 3.6 + 0.4));
+				}
+
+				float Sphere_a2 = a2;
+				float Energy = 1;
+				if (AreaLight.SphereSinAlpha > 0)
+				{
+					Sphere_a2 = New_a2(a2, AreaLight.SphereSinAlpha, VoH);
+					Energy = a2 / Sphere_a2;
+				}
+
+				if (AreaLight.LineCosSubtended < 1)
+				{
+					float LineCosTwoAlpha = AreaLight.LineCosSubtended;
+					float LineTanAlpha = sqrt((1.0001 - LineCosTwoAlpha) / (1 + LineCosTwoAlpha));
+					float Line_a2 = New_a2(Sphere_a2, LineTanAlpha, VoH);
+					Energy *= sqrt(Sphere_a2 / Line_a2);
+				}
+				return Energy;
+			}
+
+			// GGX / Trowbridge-Reitz
+			// [Walter et al. 2007, "Microfacet models for refraction through rough surfaces"]
+			float D_GGX(float a2, float NoH)
+			{
+				float d = (NoH * a2 - NoH) * NoH + 1;		// 2 mad
+				return a2 / (PI * d * d);					// 4 mul, 1 rcp
+			}
+
+			// Appoximation of joint Smith term for GGX
+			// [Heitz 2014, "Understanding the Masking-Shadowing Function in Microfacet-Based BRDFs"]
+			float Vis_SmithJointApprox(float a2, float NoV, float NoL)
+			{
+				float a = sqrt(a2);
+				float Vis_SmithV = NoL * (NoV * (1 - a) + a);
+				float Vis_SmithL = NoV * (NoL * (1 - a) + a);
+				return 0.5 * rcp(Vis_SmithV + Vis_SmithL);  
+			}
+
+			// [Schlick 1994, "An Inexpensive BRDF Model for Physically-Based Rendering"]
+			float3 F_Schlick(float3 SpecularColor, float VoH)
+			{
+				float Fc = Pow5(1 - VoH);					// 1 sub, 3 mul
+				//return Fc + (1 - Fc) * SpecularColor;		// 1 add, 3 mad
+				// Anything less than 2% is physically impossible and is instead considered to be shadowing
+				return saturate(50.0 * SpecularColor.g) * Fc + (1 - Fc) * SpecularColor;
+			}
+
+			float3 SpecularGGX(float Roughness, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
+			{
+				float a2 = Pow4(Roughness);
+				float Energy = EnergyNormalization(a2, Context.VoH, AreaLight);
+
+				// Generalized microfacet specular
+				float D = D_GGX(a2, Context.NoH) * Energy;
+				float Vis = Vis_SmithJointApprox(a2, Context.NoV, NoL);
+				float3 F = F_Schlick(SpecularColor, Context.VoH);
+
+				return (D * Vis) * F;
+			}
+
+			float3 SpecularGGX(float Roughness, float Anisotropy, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
+			{
+				float Alpha = Roughness * Roughness;
+				float a2 = Alpha * Alpha;
+
+				float Energy = EnergyNormalization(a2, Context.VoH, AreaLight);
+
+				// Generalized microfacet specular
+				float D = 0;
+				float Vis = 0;
+
+				{
+					D = D_GGX(a2, Context.NoH) * Energy;
+					Vis = Vis_SmithJointApprox(a2, Context.NoV, NoL);
+				}
+
+				float3 F = F_Schlick(SpecularColor, Context.VoH);
+
+				return (D * Vis) * F;
 			}
 
 			// Alpha is half of angle of spherical cap
@@ -328,6 +444,8 @@
 
 				GBuffer.GBufferAO = Albedo_Raw.a; //非 static_lighting 模式下，使用传入的a通道作为 GBufferAO 
 				GBuffer.IndirectIrradiance = 1;   //环境光强没有波动 
+
+				GBuffer.Anisotropy = 0;   //不带有GBuffer Tangent的话，这里总是0 
 
 				//GBuffer.CustomDepth = 1; 
 				GBuffer.Depth = SceneDepth; 
@@ -565,12 +683,15 @@
 				Context.NoV = dot(N, V);
 				Context.VoL = dot(V, L);
 
-
-
+				SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
+				Context.NoV = saturate(abs(Context.NoV) + 1e-5); 
 
 				FDirectLighting Lighting;
+				//原式: Lighting.Diffuse  = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_Lambert( GBuffer.DiffuseColor ); 
+				Lighting.Diffuse = Diffuse_Lambert(GBuffer.DiffuseColor * NoL); 
 
-
+				Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) *
+					SpecularGGX(GBuffer.Roughness, GBuffer.Anisotropy, GBuffer.SpecularColor, Context, NoL, AreaLight);
 
 				return Lighting;
 			}
@@ -578,6 +699,11 @@
 			FDirectLighting IntegrateBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, 
 				float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
 			{
+
+				//1739 : mov r11.yzw, l(0, 0, 0, 0)			->Diffuse
+				//1740 : mov r12.xyz, l(0, 0, 0, 0)			->Specular
+				//1741 : mov r13.xyz, l(0, 0, 0, 0)			->Transmission 
+
 				switch (GBuffer.ShadingModelID)
 				{
 				case SHADINGMODELID_DEFAULT_LIT:
