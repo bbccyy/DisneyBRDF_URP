@@ -11,6 +11,8 @@
 		[NoScaleOffset] _SSAO("SSAO", 2D)					= "white" {}
 		[NoScaleOffset] _ShadowTex("ShadowTex", 2D)			= "white" {}
 		[NoScaleOffset] _LUT("LUT", 2D)						= "white" {}
+
+		_CommonBar("CommonBar", range(0,5))					= 1	//用于调试效果 
 	}
 
 	SubShader
@@ -176,10 +178,16 @@
 			TEXTURE2D(_ShadowTex); SAMPLER(sampler_ShadowTex);
 			TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
 
+			float _CommonBar;
 
 			inline float Pow2(float a)
 			{
 				return a * a;
+			}
+
+			inline float3 Pow2(float3 x)
+			{
+				return x * x;
 			}
 
 			inline float Pow5(float x)
@@ -422,6 +430,11 @@
 			uint DecodeShadingModelId(float InPackedChannel)
 			{
 				return ((uint)round(InPackedChannel * (float)0xFF)) & SHADINGMODELID_MASK;
+			}
+
+			float3 ExtractSubsurfaceColor(FGBufferData BufferData)
+			{
+				return Pow2(BufferData.CustomData.rgb);
 			}
 
 			uint DecodeSelectiveOutputMask(float InPackedChannel)
@@ -703,6 +716,32 @@
 				return Lighting;
 			}
 
+
+			FDirectLighting TwoSidedBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, 
+				float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
+			{
+				FDirectLighting Lighting = DefaultLitBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+
+				float3 SubsurfaceColor = ExtractSubsurfaceColor(GBuffer);
+
+				//原式: 
+				//float Wrap = 0.5;
+				//float WrapNoL = saturate((-dot(N, L) + Wrap) / Square(1 + Wrap));
+				float WrapNoL = saturate(0.9444 - dot(N, L));
+
+				//原式: 
+				//Scatter distribution
+				//float VoL = dot(V, L);
+				//float Scatter = D_GGX(0.6 * 0.6, saturate(-VoL));
+				float Scatter = D_GGX(0.36, saturate(-dot(V, L)));
+
+				Lighting.Transmission = WrapNoL * Scatter * SubsurfaceColor; 
+				//Lighting.Transmission = 0;
+
+				return Lighting; 
+			}
+
+
 			FDirectLighting IntegrateBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, 
 				float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
 			{
@@ -718,6 +757,8 @@
 				case SHADINGMODELID_THIN_TRANSLUCENT:
 					//return DefaultLitBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 					return DefaultLitBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+				case SHADINGMODELID_TWOSIDED_FOLIAGE:
+					return TwoSidedBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_SUBSURFACE:
 					//return SubsurfaceBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_PREINTEGRATED_SKIN:
@@ -726,9 +767,6 @@
 					//return ClearCoatBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_SUBSURFACE_PROFILE:
 					//return SubsurfaceProfileBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
-				case SHADINGMODELID_TWOSIDED_FOLIAGE:
-					//return TwoSidedBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
-					//TODO 
 				case SHADINGMODELID_HAIR:
 					//return HairBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_CLOTH:
@@ -842,10 +880,8 @@
 							RetDiffuse.a += Luminance(ShadowTerm);
 						}
 
-
 						RetDiffuse.rgb += ShadowTerm;
 						RetSpecular.rgb = Lighting.Specular * LightData.SpecularScale * CommonMultiplier;
-						RetSpecular.a = 0;
 					}
 				}
 
@@ -896,7 +932,7 @@
 
 				FGBufferData GBuffer = GetGBufferData(IN.uv);
 				
-				//uint see_flag = GBuffer.ShadingModelID == (uint)5; //(0)显示天空,此外(9)眼, (8)衣服,(7)头发,(5)皮肤,(6)草,(1)木等 
+				uint see_flag = GBuffer.ShadingModelID == (uint)1; //(0)显示天空,此外(9)眼, (8)衣服,(7)头发,(5)皮肤,(6)草,(1)木等 
 
 				if (GBuffer.ShadingModelID)  //不是天空的进入 
 				{
