@@ -263,6 +263,18 @@
 				return DiffuseColor * (1 / PI);
 			}
 
+			float D_InvGGX(float a2, float NoH)
+			{
+				float A = 4;
+				float d = (NoH - a2 * NoH) * NoH + a2;
+				return rcp(PI * (1 + A * a2)) * (1 + 4 * a2 * a2 / (d * d));
+			}
+
+			float Vis_Cloth(float NoV, float NoL)
+			{
+				return rcp(4 * (NoL + NoV - NoL * NoV));
+			}
+
 			float New_a2(float a2, float SinAlpha, float VoH)
 			{
 				return a2 + 0.25 * SinAlpha * (3.0 * sqrtFast(a2) + SinAlpha) / (VoH + 0.001);
@@ -742,6 +754,40 @@
 			}
 
 
+			FDirectLighting ClothBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, 
+				float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
+			{
+				const float3 FuzzColor = ExtractSubsurfaceColor(GBuffer);  //来自CustomData.rgb 
+				const float  Cloth = saturate(GBuffer.CustomData.a); 
+
+				BxDFContext Context = (BxDFContext)0;
+				Context.NoL = dot(N, L);
+				Context.NoV = dot(N, V);
+				Context.VoL = dot(V, L);
+
+				SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
+				Context.NoV = saturate(abs(Context.NoV) + 1e-5);
+
+				//already rule out branch when AreaLight.bIsRect == true 
+				float3 Spec1 = NoL * SpecularGGX(GBuffer.Roughness, GBuffer.SpecularColor, Context, NoL, AreaLight);
+
+				//原式: 由于Cloth参数的定义，如下代码不会使用，直接屏蔽 
+				// Cloth - Asperity Scattering - Inverse Beckmann Layer
+				//float D2 = D_InvGGX(Pow4(GBuffer.Roughness), Context.NoH);
+				//float Vis2 = Vis_Cloth(Context.NoV, NoL);
+				//float3 F2 = F_Schlick(FuzzColor, Context.VoH);
+				//float3 Spec2 = NoL * (D2 * Vis2) * F2;
+
+				FDirectLighting Lighting;
+				Lighting.Diffuse = NoL * Diffuse_Lambert(GBuffer.DiffuseColor);
+				//原式: 
+				//Lighting.Specular = lerp(Spec1, Spec2, Cloth);
+				Lighting.Specular = Spec1;
+				Lighting.Transmission = 0;
+
+				return Lighting;
+			}
+
 			FDirectLighting IntegrateBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, 
 				float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
 			{
@@ -759,6 +805,8 @@
 					return DefaultLitBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_TWOSIDED_FOLIAGE:
 					return TwoSidedBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+				case SHADINGMODELID_CLOTH:
+					return ClothBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_SUBSURFACE:
 					//return SubsurfaceBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_PREINTEGRATED_SKIN:
@@ -769,8 +817,6 @@
 					//return SubsurfaceProfileBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_HAIR:
 					//return HairBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
-				case SHADINGMODELID_CLOTH:
-					//return ClothBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_EYE:
 					//return EyeBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 					return (FDirectLighting)0;
@@ -867,10 +913,8 @@
 						FCapsuleLight Capsule = GetCapsule(ToLight, LightData); 
 						Lighting = IntegrateBxDF(GBuffer, N, V, Capsule, Shadow, LightData.bInverseSquared); 
 
-						
 						float3 CommonMultiplier = LightData.Color * LightMask * Shadow.SurfaceShadow;
 						
-
 						RetDiffuse.rgb = Lighting.Diffuse * CommonMultiplier;
 						float3 ShadowTerm = Shadow.TransmissionShadow * LightData.Color * Lighting.Transmission;
 
