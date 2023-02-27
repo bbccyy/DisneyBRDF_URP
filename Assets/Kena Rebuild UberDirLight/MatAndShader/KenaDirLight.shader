@@ -444,14 +444,20 @@
 				return ((uint)round(InPackedChannel * (float)0xFF)) & SHADINGMODELID_MASK;
 			}
 
+			uint ExtractSubsurfaceProfileInt(FGBufferData BufferData)
+			{
+				// can be optimized
+				return uint(BufferData.CustomData.x * 255.0f + 0.5f);
+			}
+
 			float3 ExtractSubsurfaceColor(FGBufferData BufferData)
 			{
-				return Pow2(BufferData.CustomData.rgb);
+				return Pow2(BufferData.CustomData.yzw);
 			}
 
 			uint DecodeSelectiveOutputMask(float InPackedChannel)
 			{
-				return ((uint)round(InPackedChannel * (float)0xFF)) & ~SHADINGMODELID_MASK;
+				return ((uint)round(InPackedChannel * (float)0xFF)) & (~SHADINGMODELID_MASK);
 			}
 
 			float ConvertFromDeviceZ(float DeviceZ)
@@ -484,7 +490,7 @@
 				GBuffer.Depth = SceneDepth; 
 
 				//Kena里只有木+墙部分激活了 Skip_CustomData，其余部分均需要用到 Comp_F_R_X_I_Raw 这样用户定义的纹理和对应逻辑 
-				GBuffer.CustomData = (!(GBuffer.SelectiveOutputMask & SKIP_CUSTOMDATA_MASK)) ? Comp_F_R_X_I_Raw.xyzw : float4(0, 0, 0, 0);
+				GBuffer.CustomData = (!(GBuffer.SelectiveOutputMask & SKIP_CUSTOMDATA_MASK)) ? Comp_F_R_X_I_Raw.wxyz : float4(0, 0, 0, 0);
 
 				UNITY_FLATTEN
 				if (GBuffer.ShadingModelID == SHADINGMODELID_EYE)
@@ -630,12 +636,15 @@
 				}
 
 				float StepOffset = Dither - 0.5;
-				float ContactShadow = ShadowRayCast(
-					WorldPosition - CameraPosWS.xyz,  //对应UE4源码: WorldPosition + View.PreViewTranslation 
-					L,
-					ContactShadowLength,
-					8,
-					StepOffset);
+				float ContactShadow = 1.0f;
+
+				// TODO: 查明为何ContactShadow效果会和截帧输出不一致(特别是披肩下方的阴影) 
+				//ContactShadow = ShadowRayCast(
+				//	WorldPosition - CameraPosWS.xyz,  //对应UE4源码: WorldPosition + View.PreViewTranslation 
+				//	L,
+				//	ContactShadowLength,
+				//	8,
+				//	StepOffset);
 
 				SurfaceShadow *= ContactShadow;
 
@@ -708,6 +717,7 @@
 				}
 			}
 
+			//通用:木+石+土墙+乔木(含枝叶)等的渲染 
 			FDirectLighting DefaultLitBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
 			{
 				BxDFContext Context = (BxDFContext)0;
@@ -728,7 +738,7 @@
 				return Lighting;
 			}
 
-
+			//草+灌木 
 			FDirectLighting TwoSidedBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, 
 				float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
 			{
@@ -753,12 +763,13 @@
 				return Lighting; 
 			}
 
-
+			//衣服的布料 
 			FDirectLighting ClothBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, 
 				float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
 			{
-				const float3 FuzzColor = ExtractSubsurfaceColor(GBuffer);  //来自CustomData.rgb 
-				const float  Cloth = saturate(GBuffer.CustomData.a); 
+				const float3 FuzzColor = ExtractSubsurfaceColor(GBuffer);  //来自Tex5.rgb  
+				float  Cloth = saturate(GBuffer.CustomData.x); 
+				Cloth = 0; 
 
 				BxDFContext Context = (BxDFContext)0;
 				Context.NoL = dot(N, L);
@@ -773,18 +784,40 @@
 
 				//原式: 由于Cloth参数的定义，如下代码不会使用，直接屏蔽 
 				// Cloth - Asperity Scattering - Inverse Beckmann Layer
-				//float D2 = D_InvGGX(Pow4(GBuffer.Roughness), Context.NoH);
-				//float Vis2 = Vis_Cloth(Context.NoV, NoL);
-				//float3 F2 = F_Schlick(FuzzColor, Context.VoH);
-				//float3 Spec2 = NoL * (D2 * Vis2) * F2;
+				float D2 = D_InvGGX(Pow4(GBuffer.Roughness), Context.NoH);
+				float Vis2 = Vis_Cloth(Context.NoV, NoL);
+				float3 F2 = F_Schlick(FuzzColor, Context.VoH);
+				float3 Spec2 = NoL * (D2 * Vis2) * F2;
 
 				FDirectLighting Lighting;
 				Lighting.Diffuse = NoL * Diffuse_Lambert(GBuffer.DiffuseColor);
 				//原式: 
-				//Lighting.Specular = lerp(Spec1, Spec2, Cloth);
-				Lighting.Specular = Spec1;
+				Lighting.Specular = lerp(Spec1, Spec2, Cloth);
+				//Lighting.Specular = Spec1;
 				Lighting.Transmission = 0;
 
+				return Lighting;
+			}
+
+			//Kena 对人物皮肤的渲染 
+			FDirectLighting SubsurfaceProfileBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, 
+				float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
+			{
+
+				BxDFContext Context = (BxDFContext)0;
+				Context.NoL = dot(N, L);
+				Context.NoV = dot(N, V);
+				Context.VoL = dot(V, L);
+
+				SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
+				Context.NoV = saturate(abs(Context.NoV) + 1e-5);
+
+
+
+
+
+
+				FDirectLighting Lighting = (FDirectLighting)0;
 				return Lighting;
 			}
 
@@ -801,20 +834,20 @@
 				case SHADINGMODELID_DEFAULT_LIT:
 				case SHADINGMODELID_SINGLELAYERWATER:
 				case SHADINGMODELID_THIN_TRANSLUCENT:
-					//return DefaultLitBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 					return DefaultLitBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_TWOSIDED_FOLIAGE:
 					return TwoSidedBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_CLOTH:
 					return ClothBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+				case SHADINGMODELID_SUBSURFACE_PROFILE:
+					return SubsurfaceProfileBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+					//todo 
 				case SHADINGMODELID_SUBSURFACE:
 					//return SubsurfaceBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_PREINTEGRATED_SKIN:
 					//return PreintegratedSkinBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_CLEAR_COAT:
 					//return ClearCoatBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
-				case SHADINGMODELID_SUBSURFACE_PROFILE:
-					//return SubsurfaceProfileBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_HAIR:
 					//return HairBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_EYE:
@@ -898,8 +931,9 @@
 					//Shadow.HairTransmittance.Transmittance = 1; 
 					//Shadow.HairTransmittance.OpaqueVisibility = 1; //todo 
 					GetShadowTerms(GBuffer, LightData, WorldPosition, L, LightAttenuation, Dither, Shadow); 
-					SurfaceShadow = Shadow.SurfaceShadow; 
-
+					//Shadow.SurfaceShadow = 1;
+					//SurfaceShadow = Shadow.SurfaceShadow; 
+					
 					UNITY_BRANCH
 					if (Shadow.SurfaceShadow + Shadow.TransmissionShadow > 0)  //不处于完全黑暗的地方，都需要计算光照！ 
 					{
@@ -1008,13 +1042,11 @@
 
 					FinalColor = light_output.DiffuseLighting + light_output.SpecularLighting;
 
-					//test.x = SurfaceShadow;
-
 					test = FinalColor;
 
 				}
 				
-
+				//test.rgb = pow(test.rgb, 2.2);  //sGRB ?  
 
 				return half4(test.rgb, test.a);
 			}
