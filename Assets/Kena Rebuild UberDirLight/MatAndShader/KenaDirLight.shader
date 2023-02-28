@@ -7,10 +7,10 @@
 		[NoScaleOffset] _Normal("Normal", 2D)				= "white" {}
 		[NoScaleOffset] _Comp_M_D_R_F("Comp_M_D_R_F", 2D)	= "white" {}
 		[NoScaleOffset] _Albedo("Albedo", 2D)				= "white" {}
-		[NoScaleOffset] _Comp_F_R_X_I("Comp_F_R_X_I", 2D)	= "white" {}
+		[NoScaleOffset] _Comp_F_R_X_I("Comp_F_R_X_I", 2D)	= "white" {}	//_Comp_F_R_X_I -> CustomData 
 		[NoScaleOffset] _SSAO("SSAO", 2D)					= "white" {}
 		[NoScaleOffset] _ShadowTex("ShadowTex", 2D)			= "white" {}
-		[NoScaleOffset] _LUT("LUT", 2D)						= "white" {}
+		[NoScaleOffset] _LUT("LUT", 2D)						= "white" {}	//_LUT -> ActualSSProfilesTexture
 
 		_CommonBar("CommonBar", range(0,5))					= 1	//用于调试效果 
 	}
@@ -53,6 +53,29 @@
 			#define ZERO_PRECSHADOW_MASK			(1 << 6)
 			#define SKIP_VELOCITY_MASK				(1 << 7)
 
+			//@SubsurfaceProfileCommon 
+			// NOTE: Changing offsets below requires updating all instances of #SSSS_CONSTANTS
+			// TODO: This needs to be defined in a single place and shared between C++ and shaders!
+			#define SSSS_SUBSURFACE_COLOR_OFFSET			0
+			#define BSSS_SURFACEALBEDO_OFFSET               (SSSS_SUBSURFACE_COLOR_OFFSET+1)
+			#define BSSS_DMFP_OFFSET                        (BSSS_SURFACEALBEDO_OFFSET+1)
+			#define SSSS_TRANSMISSION_OFFSET				(BSSS_DMFP_OFFSET+1)
+			#define SSSS_BOUNDARY_COLOR_BLEED_OFFSET		(SSSS_TRANSMISSION_OFFSET+1)
+			#define SSSS_DUAL_SPECULAR_OFFSET				(SSSS_BOUNDARY_COLOR_BLEED_OFFSET+1)
+			#define SSSS_KERNEL0_OFFSET						(SSSS_DUAL_SPECULAR_OFFSET+1)
+			#define SSSS_KERNEL0_SIZE						13
+			#define SSSS_KERNEL1_OFFSET						(SSSS_KERNEL0_OFFSET + SSSS_KERNEL0_SIZE)
+			#define SSSS_KERNEL1_SIZE						9
+			#define SSSS_KERNEL2_OFFSET						(SSSS_KERNEL1_OFFSET + SSSS_KERNEL1_SIZE)
+			#define SSSS_KERNEL2_SIZE						6
+			#define SSSS_KERNEL_TOTAL_SIZE					(SSSS_KERNEL0_SIZE + SSSS_KERNEL1_SIZE + SSSS_KERNEL2_SIZE)
+			#define SSSS_TRANSMISSION_PROFILE_OFFSET		(SSSS_KERNEL0_OFFSET + SSSS_KERNEL_TOTAL_SIZE)
+			#define SSSS_TRANSMISSION_PROFILE_SIZE			32
+			#define BSSS_TRANSMISSION_PROFILE_OFFSET        (SSSS_TRANSMISSION_PROFILE_OFFSET + SSSS_TRANSMISSION_PROFILE_SIZE)
+			#define BSSS_TRANSMISSION_PROFILE_SIZE			SSSS_TRANSMISSION_PROFILE_SIZE
+			#define	SSSS_MAX_TRANSMISSION_PROFILE_DISTANCE	5.0f // See MaxTransmissionProfileDistance in ComputeTransmissionProfile(), SeparableSSS.cpp
+			#define SSSS_MAX_DUAL_SPECULAR_ROUGHNESS		2.0f
+
 			struct appdata
 			{
 				float4 positionOS	: POSITION;
@@ -94,12 +117,29 @@
 				float Depth; 
 			};
 
+			struct FHairTransmittanceData
+			{
+				// Average front/back scattering for a given L, V, T (tangent)
+				float3 Transmittance;
+				float3 A_front;
+				float3 A_back;
+
+				float OpaqueVisibility;
+				float HairCount;
+
+				// TEMP: for fastning iteration times
+				float3 LocalScattering;
+				float3 GlobalScattering;
+
+				uint ScatteringComponent;
+			};
+
 			struct FShadowTerms
 			{
 				float	SurfaceShadow;
 				float	TransmissionShadow;
 				float	TransmissionThickness;
-				//FHairTransmittanceData HairTransmittance;
+				FHairTransmittanceData HairTransmittance;
 			};
 
 			struct FCapsuleLight
@@ -169,13 +209,14 @@
 
 
 			TEXTURE2D(_SSS); SAMPLER(sampler_SSS);
-			TEXTURE2D(_Depth); SAMPLER(sampler_Depth);
+			TEXTURE2D_X_FLOAT(_Depth); SAMPLER(sampler_Depth);
 			TEXTURE2D(_Normal); SAMPLER(sampler_Normal);
 			TEXTURE2D(_Comp_M_D_R_F); SAMPLER(sampler_Comp_M_D_R_F);
 			TEXTURE2D(_Albedo); SAMPLER(sampler_Albedo);
 			TEXTURE2D(_Comp_F_R_X_I); SAMPLER(sampler_Comp_F_R_X_I);
 			TEXTURE2D(_SSAO); SAMPLER(sampler_SSAO);
 			TEXTURE2D(_ShadowTex); SAMPLER(sampler_ShadowTex);
+			//TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
 			TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
 
 			float _CommonBar;
@@ -261,6 +302,15 @@
 			float3 Diffuse_Lambert(float3 DiffuseColor)
 			{
 				return DiffuseColor * (1 / PI);
+			}
+
+			// [Burley 2012, "Physically-Based Shading at Disney"]
+			float3 Diffuse_Burley(float3 DiffuseColor, float Roughness, float NoV, float NoL, float VoH)
+			{
+				float FD90 = 0.5 + 2 * VoH * VoH * Roughness;
+				float FdV = 1 + (FD90 - 1) * Pow5(1 - NoV);
+				float FdL = 1 + (FD90 - 1) * Pow5(1 - NoL);
+				return DiffuseColor * ((1 / PI) * FdV * FdL);
 			}
 
 			float D_InvGGX(float a2, float NoH)
@@ -369,6 +419,23 @@
 				return (D * Vis) * F;
 			}
 
+			float3 DualSpecularGGX(float AverageRoughness, float Lobe0Roughness, float Lobe1Roughness, float LobeMix, float3 SpecularColor, BxDFContext Context, float NoL, FAreaLight AreaLight)
+			{
+				float AverageAlpha2 = Pow4(AverageRoughness);
+				float Lobe0Alpha2 = Pow4(Lobe0Roughness);
+				float Lobe1Alpha2 = Pow4(Lobe1Roughness);
+
+				float Lobe0Energy = EnergyNormalization(Lobe0Alpha2, Context.VoH, AreaLight);
+				float Lobe1Energy = EnergyNormalization(Lobe1Alpha2, Context.VoH, AreaLight);
+
+				// Generalized microfacet specular
+				float D = lerp(D_GGX(Lobe0Alpha2, Context.NoH) * Lobe0Energy, D_GGX(Lobe1Alpha2, Context.NoH) * Lobe1Energy, LobeMix);
+				float Vis = Vis_SmithJointApprox(AverageAlpha2, Context.NoV, NoL); // Average visibility well approximates using two separate ones (one per lobe).
+				float3 F = F_Schlick(SpecularColor, Context.VoH);
+
+				return (D * Vis) * F;
+			}
+
 			// Alpha is half of angle of spherical cap
 			float SphereHorizonCosWrap(float NoL, float SinAlphaSqr)
 			{
@@ -447,7 +514,7 @@
 			uint ExtractSubsurfaceProfileInt(FGBufferData BufferData)
 			{
 				// can be optimized
-				return uint(BufferData.CustomData.x * 255.0f + 0.5f);
+				return uint(BufferData.CustomData.y * 255 + 0.5f);
 			}
 
 			float3 ExtractSubsurfaceColor(FGBufferData BufferData)
@@ -464,6 +531,21 @@
 			{
 				// Supports ortho and perspective, see CreateInvDeviceZToWorldZTransform()
 				return DeviceZ * InvDeviceZToWorldZTransform[0] + InvDeviceZToWorldZTransform[1] + 1.0f / (DeviceZ * InvDeviceZToWorldZTransform[2] - InvDeviceZToWorldZTransform[3]);
+			}
+
+			void GetProfileDualSpecular(FGBufferData GBuffer, out float AverageToRoughness0, out float AverageToRoughness1, out float LobeMix)
+			{
+				//Branch for -> !FORWARD_SHADING
+				// 0..255, which SubSurface profile to pick
+				uint SubsurfaceProfileInt = ExtractSubsurfaceProfileInt(GBuffer); 
+				//原式如下: 
+				//float4 Data = LOAD_TEXTURE2D_X(_LUT, uint2(5, SubsurfaceProfileInt)).xyzw;
+				//_LUT -> Width-Height = 98-64 
+				//如下，基于y轴需要reverse，采用Texture_Height - SubsurfaceProfileInt的方式确定y的正确位置 
+				float3 Data = LOAD_TEXTURE2D(_LUT, uint2(SSSS_DUAL_SPECULAR_OFFSET, 64 - SubsurfaceProfileInt)).xyz;
+				AverageToRoughness0 = Data.x * SSSS_MAX_DUAL_SPECULAR_ROUGHNESS;
+				AverageToRoughness1 = Data.y * SSSS_MAX_DUAL_SPECULAR_ROUGHNESS;
+				LobeMix = Data.z;
 			}
 
 			FGBufferData DecodeGBufferData(float3 Normal_Raw, float4 Albedo_Raw, float4 Comp_M_D_R_F_Raw, 
@@ -717,6 +799,15 @@
 				}
 			}
 
+
+			float3 HairShading(FGBufferData GBuffer, float3 L, float3 V, half3 N, float Shadow, FHairTransmittanceData HairTransmittance, float Backlit, float Area, uint2 Random, bool bEvalMultiScatter)
+			{
+
+
+			}
+
+
+
 			//通用:木+石+土墙+乔木(含枝叶)等的渲染 
 			FDirectLighting DefaultLitBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
 			{
@@ -812,12 +903,38 @@
 				SphereMaxNoH(Context, AreaLight.SphereSinAlpha, true);
 				Context.NoV = saturate(abs(Context.NoV) + 1e-5);
 
+				float AverageToRoughness0 = 1;
+				float AverageToRoughness1 = 1;
+				float LobeMix = 0;
+				GetProfileDualSpecular(GBuffer, AverageToRoughness0, AverageToRoughness1, LobeMix);
 
+				float AverageRoughness = GBuffer.Roughness;
+				float Lobe0Roughness = max(saturate(AverageRoughness * AverageToRoughness0), 0.02f);
+				float Lobe1Roughness = saturate(AverageRoughness * AverageToRoughness1);
 
-
-
+				// Smoothly lerp to default single GGX lobe as Opacity approaches 0, before reverting to SHADINGMODELID_DEFAULT_LIT.
+				// See SUBSURFACE_PROFILE_OPACITY_THRESHOLD in ShadingModelsMaterial.ush.
+				float Opacity = GBuffer.CustomData.x;
+				Lobe0Roughness = lerp(1.0f, Lobe0Roughness, saturate(Opacity * 10.0f));
+				Lobe1Roughness = lerp(1.0f, Lobe1Roughness, saturate(Opacity * 10.0f));
 
 				FDirectLighting Lighting = (FDirectLighting)0;
+
+				Lighting.Diffuse = AreaLight.FalloffColor * (Falloff * NoL) * Diffuse_Burley(GBuffer.DiffuseColor, GBuffer.Roughness, Context.NoV, NoL, Context.VoH);
+
+				Lighting.Specular = AreaLight.FalloffColor * (Falloff * NoL) * DualSpecularGGX(AverageRoughness, Lobe0Roughness, Lobe1Roughness, LobeMix, GBuffer.SpecularColor, Context, NoL, AreaLight);
+
+				return Lighting;
+			}
+
+			//头发渲染 
+			FDirectLighting HairBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
+			{
+				FDirectLighting Lighting;
+				Lighting.Diffuse = 0;
+				Lighting.Specular = 0;
+				bool bEvalMultiScatter = true;
+				Lighting.Transmission = AreaLight.FalloffColor * Falloff * HairShading(GBuffer, L, V, N, Shadow.TransmissionShadow, Shadow.HairTransmittance, 1, 0, uint2(0, 0), bEvalMultiScatter);
 				return Lighting;
 			}
 
@@ -841,15 +958,14 @@
 					return ClothBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_SUBSURFACE_PROFILE:
 					return SubsurfaceProfileBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
-					//todo 
+				case SHADINGMODELID_HAIR:
+					//return HairBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_SUBSURFACE:
 					//return SubsurfaceBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_PREINTEGRATED_SKIN:
 					//return PreintegratedSkinBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_CLEAR_COAT:
 					//return ClearCoatBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
-				case SHADINGMODELID_HAIR:
-					//return HairBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_EYE:
 					//return EyeBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 					return (FDirectLighting)0;
@@ -928,6 +1044,7 @@
 					Shadow.SurfaceShadow = AmbientOcclusion;
 					Shadow.TransmissionShadow = 1;
 					Shadow.TransmissionThickness = 1;
+					Shadow.HairTransmittance = (FHairTransmittanceData)0;
 					//Shadow.HairTransmittance.Transmittance = 1; 
 					//Shadow.HairTransmittance.OpaqueVisibility = 1; //todo 
 					GetShadowTerms(GBuffer, LightData, WorldPosition, L, LightAttenuation, Dither, Shadow); 
@@ -984,6 +1101,7 @@
 				ndc_xy = ndc_xy * float2(1.0, -1.0);
 
 				OUT.viewDirWS = mul(Matrix_Inv_VP, float3(ndc_xy.xy, 1));
+				//OUT.viewDirWS = mul(Matrix_Inv_P, float4(ndc_xy.xy, 1, 1)).xyz;
 
 				return OUT;
 			}
@@ -1015,10 +1133,11 @@
 				if (GBuffer.ShadingModelID)  //不是天空的进入 
 				{
 					//首先重构世界坐标 
-					half3 ViewDirWS = normalize(IN.viewDirWS);
+					float3 ViewDirWS = normalize(IN.viewDirWS);
 					float3 WorldPosition = ViewDirWS * GBuffer.Depth + CameraPosWS.xyz;
+
 					float3 CameraVector = normalize(WorldPosition - CameraPosWS.xyz);
-					//test.xyz = abs(posWS - CameraPosWS.xyz) / 35000; //用于验证世界坐标解码后的正确性 
+					//test.xyz = abs(WorldPosition - CameraPosWS.xyz) / 35000; //用于验证世界坐标解码后的正确性 
 
 					//在一定屏幕空间范围内的随机变量，一般用于模糊摩尔纹或其他异样 
 					float Dither = InterleavedGradientNoise(IN.vertex, FrameId); 
@@ -1041,12 +1160,12 @@
 					);
 
 					FinalColor = light_output.DiffuseLighting + light_output.SpecularLighting;
+					
 
 					test = FinalColor;
-
 				}
 				
-				//test.rgb = pow(test.rgb, 2.2);  //sGRB ?  
+				//test.rgb = pow(test.rgb, 1/2.2);  //sGRB ?  
 
 				return half4(test.rgb, test.a);
 			}
