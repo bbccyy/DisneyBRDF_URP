@@ -247,6 +247,26 @@
 				return asfloat(i);
 			}
 
+			// max absolute error 9.0x10^-3
+			// Eberly's polynomial degree 1 - respect bounds
+			// 4 VGPR, 12 FR (8 FR, 1 QR), 1 scalar
+			// input [-1, 1] and output [0, PI]
+			float acosFast(float inX)
+			{
+				float x = abs(inX);
+				float res = -0.156583f * x + (0.5 * PI);
+				res *= sqrt(1.0f - x);
+				return (inX >= 0) ? res : PI - res;
+			}
+
+			// Same cost as acosFast + 1 FR
+			// Same error
+			// input [-1, 1] and output [-PI/2, PI/2]
+			float asinFast(float x)
+			{
+				return (0.5 * PI) - acosFast(x);
+			}
+
 			float Luminance(float3 aColor)
 			{
 				return dot(aColor, float3(0.3, 0.59, 0.11));
@@ -297,6 +317,36 @@
 				Capsule.LightPos[0] = ToLight - 0.5 * Capsule.Length * LightData.Tangent;
 				Capsule.LightPos[1] = ToLight + 0.5 * Capsule.Length * LightData.Tangent;
 				return Capsule;
+			}
+
+			float Hair_g(float B, float Theta)
+			{
+				return exp(-0.5 * Pow2(Theta) / (B * B)) / (sqrt(2 * PI) * B);
+			}
+
+			float Hair_F(float CosTheta)
+			{
+				const float n = 1.55;
+				const float F0 = Pow2((1 - n) / (1 + n));
+				return F0 + (1 - F0) * Pow5(1 - CosTheta);
+			}
+
+			float3 KajiyaKayDiffuseAttenuation(FGBufferData GBuffer, float3 L, float3 Vp, half3 N, float Shadow)
+			{
+				// Use soft Kajiya Kay diffuse attenuation
+				float KajiyaDiffuse = 1 - abs(dot(N, L));
+
+				float3 FakeNormal = normalize(Vp);
+
+				N = FakeNormal;
+
+				// Hack approximation for multiple scattering.
+				float Wrap = 1;
+				float NoL = saturate((dot(N, L) + Wrap) / Pow2(1 + Wrap));
+				float DiffuseScatter = (1 / PI) * lerp(NoL, KajiyaDiffuse, 0.33) * GBuffer.Metallic;
+				float Luma = Luminance(GBuffer.BaseColor);
+				float3 ScatterTint = pow(GBuffer.BaseColor / Luma, 1 - Shadow);
+				return sqrt(GBuffer.BaseColor) * DiffuseScatter * ScatterTint;
 			}
 
 			float3 Diffuse_Lambert(float3 DiffuseColor)
@@ -802,11 +852,88 @@
 
 			float3 HairShading(FGBufferData GBuffer, float3 L, float3 V, half3 N, float Shadow, FHairTransmittanceData HairTransmittance, float Backlit, float Area, uint2 Random, bool bEvalMultiScatter)
 			{
+				float ClampedRoughness = clamp(GBuffer.Roughness, 1 / 255.0f, 1.0f);
 
+				const float VoL = dot(V, L);
+				const float SinThetaL = dot(N, L);
+				const float SinThetaV = dot(N, V);
+				float CosThetaD = cos(0.5 * abs(asinFast(SinThetaV) - asinFast(SinThetaL)));
 
+				const float3 Lp = L - SinThetaL * N;
+				const float3 Vp = V - SinThetaV * N;
+				const float CosPhi = dot(Lp, Vp) * rsqrt(dot(Lp, Lp) * dot(Vp, Vp) + 1e-4);
+				const float CosHalfPhi = sqrt(saturate(0.5 + 0.5 * CosPhi));
+
+				float n = 1.55;
+
+				float n_prime = 1.19 / CosThetaD + 0.36 * CosThetaD;
+
+				float Shift = 0.035;
+				float Alpha[] =
+				{
+					-Shift * 2,
+					Shift,
+					Shift * 4,
+				};
+				float B[] =
+				{
+					Area + Pow2(ClampedRoughness),
+					Area + Pow2(ClampedRoughness) / 2,
+					Area + Pow2(ClampedRoughness) * 2,
+				};
+
+				float3 S = 0;
+
+				//R
+				{
+					const float sa = sin(Alpha[0]);
+					const float ca = cos(Alpha[0]);
+					float Shift = 2 * sa * (ca * CosHalfPhi * sqrt(1 - SinThetaV * SinThetaV) + sa * SinThetaV);
+
+					float Mp = Hair_g(B[0] * sqrt(2.0) * CosHalfPhi, SinThetaL + SinThetaV - Shift);
+					float Np = 0.25 * CosHalfPhi;
+					float Fp = Hair_F(sqrt(saturate(0.5 + 0.5 * VoL)));
+					S += Mp * Np * Fp * (GBuffer.Specular * 2) * lerp(1, Backlit, saturate(-VoL));
+				}
+
+				// TT
+				{
+					float Mp = Hair_g(B[1], SinThetaL + SinThetaV - Alpha[1]);
+
+					float a = 1 / n_prime;
+
+					float h = CosHalfPhi * (1 + a * (0.6 - 0.8 * CosPhi));
+
+					float f = Hair_F(CosThetaD * sqrt(saturate(1 - h * h)));
+					float Fp = Pow2(1 - f);
+
+					float3 Tp = pow(GBuffer.BaseColor, 0.5 * sqrt(1 - Pow2(h * a)) / CosThetaD);
+
+					float Np = exp(-3.65 * CosPhi - 3.98);
+
+					S += Mp * Np * Fp * Tp * Backlit;
+				}
+
+				// TRT
+				{
+					float Mp = Hair_g(B[2], SinThetaL + SinThetaV - Alpha[2]);
+
+					float f = Hair_F(CosThetaD * 0.5);
+					float Fp = Pow2(1 - f) * f;
+
+					float3 Tp = pow(GBuffer.BaseColor, 0.8 / CosThetaD);
+
+					float Np = exp(17 * CosPhi - 16.78);
+
+					S += Mp * Np * Fp * Tp;
+				}
+
+				S += KajiyaKayDiffuseAttenuation(GBuffer, L, Vp, N, Shadow);
+
+				S = -min(-S, 0.0);
+
+				return S;
 			}
-
-
 
 			//通用:木+石+土墙+乔木(含枝叶)等的渲染 
 			FDirectLighting DefaultLitBxDF(FGBufferData GBuffer, half3 N, half3 V, half3 L, float Falloff, float NoL, FAreaLight AreaLight, FShadowTerms Shadow)
@@ -934,7 +1061,8 @@
 				Lighting.Diffuse = 0;
 				Lighting.Specular = 0;
 				bool bEvalMultiScatter = true;
-				Lighting.Transmission = AreaLight.FalloffColor * Falloff * HairShading(GBuffer, L, V, N, Shadow.TransmissionShadow, Shadow.HairTransmittance, 1, 0, uint2(0, 0), bEvalMultiScatter);
+				Lighting.Transmission = AreaLight.FalloffColor * Falloff * HairShading(GBuffer, L, V, N, 
+					Shadow.TransmissionShadow, Shadow.HairTransmittance, 1, 0, uint2(0, 0), bEvalMultiScatter);
 				return Lighting;
 			}
 
@@ -959,7 +1087,7 @@
 				case SHADINGMODELID_SUBSURFACE_PROFILE:
 					return SubsurfaceProfileBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_HAIR:
-					//return HairBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
+					return HairBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_SUBSURFACE:
 					//return SubsurfaceBxDF(GBuffer, N, V, L, Falloff, NoL, AreaLight, Shadow);
 				case SHADINGMODELID_PREINTEGRATED_SKIN:
@@ -1133,6 +1261,7 @@
 				if (GBuffer.ShadingModelID)  //不是天空的进入 
 				{
 					//首先重构世界坐标 
+					//TODO: 确认世界坐标重建的正确性 
 					float3 ViewDirWS = normalize(IN.viewDirWS);
 					float3 WorldPosition = ViewDirWS * GBuffer.Depth + CameraPosWS.xyz;
 
@@ -1161,8 +1290,11 @@
 
 					FinalColor = light_output.DiffuseLighting + light_output.SpecularLighting;
 					
+					float3 V = -CameraVector;
+					float3 L = kena_LightData.Direction;
 
 					test = FinalColor;
+					//test = dot(V,L);
 				}
 				
 				//test.rgb = pow(test.rgb, 1/2.2);  //sGRB ?  
