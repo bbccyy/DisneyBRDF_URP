@@ -1226,15 +1226,16 @@
 				OUT.vertex = TransformObjectToHClip(IN.positionOS);
 
 				float2 ndc_xy = IN.uv * 2 - 1;  //放到[-1,1]区间 
-				ndc_xy = ndc_xy * float2(1.0, -1.0);
+				ndc_xy = ndc_xy * float2(1.0, 1.0);  //TODO 
 
 				OUT.viewDirWS = mul(Matrix_Inv_VP, float3(ndc_xy.xy, 1));
-				//OUT.viewDirWS = mul(Matrix_Inv_P, float4(ndc_xy.xy, 1, 1)).xyz;
+				//OUT.viewDirWS = mul(Matrix_Inv_P, float4(ndc_xy.xy, 1, 0)).xyz;
+				//OUT.viewDirWS = float3(ndc_xy.xy, 1);
 
 				return OUT;
 			}
 
-			half4 frag(v2f IN) : SV_Target
+			float4 frag(v2f IN) : SV_Target
 			{
 				//init all local buffer data
 				kena_LightData.ShadowedBits = 3;		  //cb1[2].x=3 -> 需用uint4查看 
@@ -1289,17 +1290,17 @@
 					);
 
 					FinalColor = light_output.DiffuseLighting + light_output.SpecularLighting;
-					
-					float3 V = -CameraVector;
-					float3 L = kena_LightData.Direction;
 
 					test = FinalColor;
-					//test = dot(V,L);
+					
+					//验证世界坐标正确性用
+					//float4 shouldBeHClipPos = mul(Matrix_VP, float4(WorldPosition - CameraPosWS.xyz, 1));
+					//test.rgb = shouldBeHClipPos.xyz / shouldBeHClipPos.w;
 				}
 				
 				//test.rgb = pow(test.rgb, 1/2.2);  //sGRB ?  
 
-				return half4(test.rgb, test.a);
+				return float4(test.rgb, test.a);
 			}
 
 			ENDHLSL
