@@ -1165,6 +1165,7 @@
 
 				float4 RetDiffuse = 0;
 				float4 RetSpecular = 0;
+				float3 CommonMultiplier = 0;
 
 				//if (LightMask > 0)		//TRUE -> 假设任何位置都能被 RadialLight 照射到 
 				{
@@ -1192,7 +1193,7 @@
 						FCapsuleLight Capsule = GetCapsule(ToLight, LightData); 
 						Lighting = IntegrateBxDF(GBuffer, N, V, Capsule, Shadow, LightData.bInverseSquared); 
 
-						float3 CommonMultiplier = LightData.Color * LightMask * Shadow.SurfaceShadow;
+						CommonMultiplier = LightData.Color * LightMask * Shadow.SurfaceShadow;
 						
 						RetDiffuse.rgb = Lighting.Diffuse * CommonMultiplier;
 						float3 ShadowTerm = Shadow.TransmissionShadow * LightData.Color * Lighting.Transmission;
@@ -1261,8 +1262,6 @@
 
 				if (GBuffer.ShadingModelID)  //不是天空的进入 
 				{
-					//首先重构世界坐标 
-					//TODO: 确认世界坐标重建的正确性 
 					float3 ViewDirWS = normalize(IN.viewDirWS);
 					float3 WorldPosition = ViewDirWS * GBuffer.Depth + CameraPosWS.xyz;
 
@@ -1295,7 +1294,7 @@
 					
 					//验证世界坐标正确性用
 					//float4 shouldBeHClipPos = mul(Matrix_VP, float4(WorldPosition - CameraPosWS.xyz, 1));
-					//test.rgb = shouldBeHClipPos.xyz / shouldBeHClipPos.w;
+					//test.rgb = shouldBeHClipPos.xyz / shouldBeHClipPos.w; 
 				}
 				
 				//test.rgb = pow(test.rgb, 1/2.2);  //sGRB ?  
