@@ -4,19 +4,24 @@ using UnityEngine.Rendering.Universal;
 
 public class SimpleFullScreenBlit : ScriptableRendererFeature
 {
-
-    public Material kena_GI;
+    public Material kena_Prefix; public bool openPrefix;
+    public Material kena_DirLight; public bool openDirLight;
+    public Material kena_GI; public bool openGI;
 
     class FullScreenBlitPass : ScriptableRenderPass
     {
-        private Material blitMat = null;
+        private Material blitMat0 = null;
+        private Material blitMat1 = null;
+        private Material blitMat2 = null;
         private RenderTargetIdentifier source { get; set; }
         private RenderTargetHandle destination { get; set; }
 
         string m_ProfilerTag = "FullScreenBlit_GI";
-        public FullScreenBlitPass(Material mat)
+        public FullScreenBlitPass(Material mat0, Material mat1, Material mat2, bool b0, bool b1, bool b2)
         {
-            blitMat = mat;
+            if (b0) blitMat0 = mat0;
+            if (b1) blitMat1 = mat1;
+            if (b2) blitMat2 = mat2;
         }
 
         public void Setup(RenderTargetIdentifier source, RenderTargetHandle destination)
@@ -42,7 +47,16 @@ public class SimpleFullScreenBlit : ScriptableRendererFeature
         {
             CommandBuffer cmd = CommandBufferPool.Get(m_ProfilerTag);
 
-            Blit(cmd, source, source, blitMat);
+            FrameCleanup(cmd);
+
+            if (blitMat0)
+                Blit(cmd, source, source, blitMat0);
+
+            if (blitMat1)
+                Blit(cmd, source, source, blitMat1);
+
+            if (blitMat2)
+                Blit(cmd, source, source, blitMat2);
 
             context.ExecuteCommandBuffer(cmd); 
             CommandBufferPool.Release(cmd);
@@ -59,7 +73,7 @@ public class SimpleFullScreenBlit : ScriptableRendererFeature
     /// <inheritdoc/>
     public override void Create()
     {
-        m_ScriptablePass = new FullScreenBlitPass(kena_GI);
+        m_ScriptablePass = new FullScreenBlitPass(kena_Prefix, kena_DirLight, kena_GI, openPrefix, openDirLight, openGI);
 
         // Configures where the render pass should be injected.
         m_ScriptablePass.renderPassEvent = RenderPassEvent.AfterRenderingOpaques;

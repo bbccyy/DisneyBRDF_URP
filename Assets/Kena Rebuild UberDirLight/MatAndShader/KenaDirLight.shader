@@ -18,6 +18,8 @@
 	SubShader
 	{
 		Tags {"RenderType"="Opaque"}
+		Blend One One
+
 		LOD 100
 
 		Pass
@@ -1227,7 +1229,7 @@
 				OUT.vertex = TransformObjectToHClip(IN.positionOS);
 
 				float2 ndc_xy = IN.uv * 2 - 1;  //放到[-1,1]区间 
-				ndc_xy = ndc_xy * float2(1.0, 1.0);  //TODO 
+				ndc_xy = ndc_xy * float2(1.0, 1.0);  //TODO -> 经过研究，Unity里无需 Revers-Y 
 
 				OUT.viewDirWS = mul(Matrix_Inv_VP, float3(ndc_xy.xy, 1));
 				//OUT.viewDirWS = mul(Matrix_Inv_P, float4(ndc_xy.xy, 1, 0)).xyz;

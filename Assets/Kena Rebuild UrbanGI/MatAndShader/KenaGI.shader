@@ -18,6 +18,8 @@ Shader "Kena/KenaGI"
     SubShader
     {
         Tags { "RenderType"="Opaque" }
+        Blend One One
+
         LOD 100
 
         Pass

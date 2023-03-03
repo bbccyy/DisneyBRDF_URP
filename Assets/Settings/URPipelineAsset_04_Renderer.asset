@@ -56,4 +56,6 @@ MonoBehaviour:
   m_Name: NewSimpleFullScreenBlit
   m_EditorClassIdentifier: 
   m_Active: 1
-  kena_GI: {fileID: 2100000, guid: 67e32f826a5be8244843bf714ef51c70, type: 2}
+  kena_Prefix: {fileID: 0}
+  kena_DirLight: {fileID: 2100000, guid: 67e32f826a5be8244843bf714ef51c70, type: 2}
+  kena_GI: {fileID: 2100000, guid: 0fdcbf924a043a547831348cd3d5f7e6, type: 2}
