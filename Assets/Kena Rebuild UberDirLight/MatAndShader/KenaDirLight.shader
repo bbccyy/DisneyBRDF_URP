@@ -129,20 +129,18 @@
 			float _CommonBar;
 
 			static float view_minRoughness = 0.02; //cb0[219].y 
-			static float4 InvDeviceZToWorldZTransform = float4(0.00, 0.00, 0.10, -1.00000E-08); //CB0[65] 对应Unity的zBufferParams  
-			static float4 ScreenPositionScaleBias = float4(0.49971, -0.50, 0.50, 0.49971); //CB0[66] 从NDC变换到UV空间 
-			static float4 CameraPosWS = float4(-58625.35547, 27567.39453, -6383.71826, 0); //世界空间中摄像机的坐标值 
+			
 			static float4x4 Matrix_VP = float4x4(
 				float4(0.9252,		-0.61489,	-0.00021,	0.00),
 				float4(0.46399,		0.69752,	1.78886,	0.00),
 				float4(0.00,		0.00,		0.00,		10.00),
 				float4(-0.50162,	-0.75408,	0.42396,	0.00)
 				);
-			static float3x3 Matrix_Inv_VP = float3x3(
+			/*static float3x3 Matrix_Inv_VP = float3x3(
 				float3(0.7495,			0.11887,	-0.5012),
 				float3(-0.49857,		0.1787,		-0.75428),
 				float3(-2.68273E-08,	0.4585,		0.42411)
-				);
+				);*/
 			static float4x4 Matrix_Inv_P = float4x4(			//CB0[36] ~ CB0[39]
 				float4(0.90018, 0,			0,		0.00045	),
 				float4(0,	    0.50625,	0,		0.00017	),
@@ -366,14 +364,6 @@
 				return Line0 + t * Line01;
 			}
 
-			bool CheckerFromSceneColorUV(float2 UVSceneColor)
-			{
-				// relative to left top of the rendertarget (not viewport)
-				uint2 PixelPos = uint2(UVSceneColor * View_BufferSizeAndInvSize.xy);
-				uint TemporalAASampleIndex = 3; 
-				return (PixelPos.x + PixelPos.y + TemporalAASampleIndex) & 1;
-			}
-
 			uint ExtractSubsurfaceProfileInt(FGBufferData BufferData)
 			{
 				// can be optimized
@@ -383,12 +373,6 @@
 			float3 ExtractSubsurfaceColor(FGBufferData BufferData)
 			{
 				return Pow2(BufferData.CustomData.yzw);
-			}
-
-			float ConvertFromDeviceZ(float DeviceZ)
-			{
-				// Supports ortho and perspective, see CreateInvDeviceZToWorldZTransform()
-				return DeviceZ * InvDeviceZToWorldZTransform[0] + InvDeviceZToWorldZTransform[1] + 1.0f / (DeviceZ * InvDeviceZToWorldZTransform[2] - InvDeviceZToWorldZTransform[3]);
 			}
 
 			void GetProfileDualSpecular(FGBufferData GBuffer, out float AverageToRoughness0, out float AverageToRoughness1, out float LobeMix)
@@ -608,7 +592,6 @@
 					Context.VoH = saturate(Context.VoL * VoL2 + VoL2);
 				}
 			}
-
 
 			float3 HairShading(FGBufferData GBuffer, float3 L, float3 V, half3 N, float Shadow, FHairTransmittanceData HairTransmittance, float Backlit, float Area, uint2 Random, bool bEvalMultiScatter)
 			{
@@ -989,7 +972,7 @@
 				float2 ndc_xy = IN.uv * 2 - 1;  //放到[-1,1]区间 
 				ndc_xy = ndc_xy * float2(1.0, 1.0);  //TODO -> 经过研究，Unity里无需 Revers-Y 
 
-				OUT.viewDirWS = mul(Matrix_Inv_VP, float3(ndc_xy.xy, 1));
+				OUT.viewDirWS = mul((float3x3)Matrix_Inv_VP, float3(ndc_xy.xy, 1));
 				//OUT.viewDirWS = mul(Matrix_Inv_P, float4(ndc_xy.xy, 1, 0)).xyz;
 				//OUT.viewDirWS = float3(ndc_xy.xy, 1);
 

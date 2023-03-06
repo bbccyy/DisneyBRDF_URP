@@ -47,7 +47,8 @@
 #define	SSSS_MAX_TRANSMISSION_PROFILE_DISTANCE	5.0f // See MaxTransmissionProfileDistance in ComputeTransmissionProfile(), SeparableSSS.cpp
 #define SSSS_MAX_DUAL_SPECULAR_ROUGHNESS		2.0f
 
-
+// Must match C++
+#define AO_DOWNSAMPLE_FACTOR 2
 
 //------------------Define Struct Start------------------
 struct FDeferredLightData
@@ -102,6 +103,19 @@ static FDeferredLightData kena_LightData = (FDeferredLightData)0;
 
 static float4 View_BufferSizeAndInvSize = float4(1708.00, 960.00, 0.00059, 0.00104);
 static float4 View_ViewSizeAndInvSize = float4(1708.00, 960.00, 0.00059, 0.00104);
+
+static float4 InvDeviceZToWorldZTransform = float4(0.00, 0.00, 0.10, -1.00000E-08); //CB0[65] 对应Unity的zBufferParams  
+static float4 ScreenPositionScaleBias = float4(0.49971, -0.50, 0.50, 0.49971); //CB0[66] 从NDC变换到UV空间 
+static float4 CameraPosWS = float4(-58625.35547, 27567.39453, -6383.71826, 0); //世界空间中摄像机的坐标值 
+
+static float4x4 Matrix_Inv_VP = float4x4(
+	float4(0.7495,			0.11887,	-0.5012,		-58625.35547),
+	float4(-0.49857,		0.1787,		-0.75428,		27567.39453),
+	float4(-2.68273E-08,	0.4585,		0.42411,		-6383.71826),
+	float4(0,				0,			0,				1.00)
+);
+
+
 //------------------Per DC Com Variant End------------------
 
 
@@ -219,6 +233,20 @@ uint DecodeShadingModelId(float InPackedChannel)
 uint DecodeSelectiveOutputMask(float InPackedChannel)
 {
     return ((uint)round(InPackedChannel * (float)0xFF)) & (~SHADINGMODELID_MASK);
+}
+
+float ConvertFromDeviceZ(float DeviceZ)
+{
+	// Supports ortho and perspective, see CreateInvDeviceZToWorldZTransform()
+	return DeviceZ * InvDeviceZToWorldZTransform[0] + InvDeviceZToWorldZTransform[1] + 1.0f / (DeviceZ * InvDeviceZToWorldZTransform[2] - InvDeviceZToWorldZTransform[3]);
+}
+
+bool CheckerFromSceneColorUV(float2 UVSceneColor)
+{
+	// relative to left top of the rendertarget (not viewport)
+	uint2 PixelPos = uint2(UVSceneColor * View_BufferSizeAndInvSize.xy);
+	uint TemporalAASampleIndex = 3;
+	return (PixelPos.x + PixelPos.y + TemporalAASampleIndex) & 1;
 }
 #endif 
 //------------------Utility End------------------

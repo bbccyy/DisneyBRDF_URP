@@ -7,6 +7,10 @@ Shader "Unlit/kenaPre"
     SubShader
     {
         Tags { "RenderType"="Opaque" }
+
+        Blend Zero Zero  //在OpenGL ES3之下 这样才管用 
+        //Blend Zero One //在DX12下就管用
+
         LOD 100
 
         Pass
