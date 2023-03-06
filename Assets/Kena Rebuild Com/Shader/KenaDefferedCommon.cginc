@@ -112,6 +112,7 @@ TEXTURE2D(_Normal); SAMPLER(sampler_Normal);
 TEXTURE2D(_Comp_M_D_R_F); SAMPLER(sampler_Comp_M_D_R_F);
 TEXTURE2D(_Albedo); SAMPLER(sampler_Albedo);
 TEXTURE2D(_Comp_F_R_X_I); SAMPLER(sampler_Comp_F_R_X_I);
+TEXTURE2D(_SSAO); SAMPLER(sampler_SSAO);
 //------------------Declare Buffer End------------------
 
 

@@ -2,16 +2,17 @@ Shader "Unlit/Kena_GI_Rebuild"
 {
     Properties
     {
-        [NoScaleOffset] _Diffuse("Diffuse", 2D) = "white" {}
+        [NoScaleOffset] _Albedo("Albedo", 2D) = "white" {}
         [NoScaleOffset] _Depth("Depth", 2D) = "white" {}
-        [NoScaleOffset] _AO("AO", 2D) = "white" {}
-        [NoScaleOffset] _F_R_X_X("F_R_X_X", 2D) = "white" {}
+        [NoScaleOffset] _SSAO("SSAO", 2D) = "white" {}
+        [NoScaleOffset] _Comp_F_R_X_I("Comp_F_R_X_I", 2D) = "white" {}
+        [NoScaleOffset] _Comp_M_D_R_F("Comp_M_D_R_F", 2D) = "white" {}
+        [NoScaleOffset] _Normal("Normal", 2D) = "white" {}
+
         [NoScaleOffset] _GNorm("GNorm", 2D) = "white" {}
         [NoScaleOffset] _IBL("IBL", CUBE) = "white" {}
         [NoScaleOffset] _Sky("Sky", CUBE) = "white" {}
         [NoScaleOffset] _LUT("LUT", 2D) = "white" {}
-        [NoScaleOffset] _Norm("Norm", 2D) = "white" {}
-        [NoScaleOffset] _R_I_F_R("R_I_F_R", 2D) = "white" {}
         [NoScaleOffset] _Spec("Spec", 2D) = "white" {}
 
     }
@@ -30,6 +31,7 @@ Shader "Unlit/Kena_GI_Rebuild"
             #pragma fragment frag
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets\Kena Rebuild Com\Shader\KenaDefferedCommon.cginc"
 
             struct appdata
             {
@@ -46,23 +48,14 @@ Shader "Unlit/Kena_GI_Rebuild"
             };
 
 
-            TEXTURE2D(_Diffuse); SAMPLER(sampler_Diffuse);
-            TEXTURE2D(_Depth); SAMPLER(sampler_Depth);
-            TEXTURE2D(_AO); SAMPLER(sampler_AO);
-            TEXTURE2D(_F_R_X_X); SAMPLER(sampler_F_R_X_X);
             TEXTURE2D(_GNorm); SAMPLER(sampler_GNorm);
             TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
-            TEXTURE2D(_Norm); SAMPLER(sampler_Norm);
-            TEXTURE2D(_R_I_F_R); SAMPLER(sampler_R_I_F_R);
             TEXTURE2D(_Spec); SAMPLER(sampler_Spec);
             TEXTURECUBE(_IBL); SAMPLER(sampler_IBL);
             TEXTURECUBE(_Sky); SAMPLER(sampler_Sky);
 
-            static float4 View_BufferSizeAndInvSize = float4(1708.00, 960.00, 0.00059, 0.00104);
-            static float4 View_ViewSizeAndInvSize = float4(1708.00, 960.00, 0.00059, 0.00104);
+
             static float4 View_ViewRectMin = float4(0, 0, 0, 0);
-
-
 
             float2 SvPositionToBufferUV(float4 SvPosition)
             {
@@ -77,7 +70,6 @@ Shader "Unlit/Kena_GI_Rebuild"
                 // SvPosition.w: so .w has the SceneDepth, some mobile code and the DepthFade material expression wants that
                 return float4(NDCPos.xyz, 1) * SvPosition.w;
             }
-
 
 
             v2f vert (appdata IN)

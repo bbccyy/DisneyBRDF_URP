@@ -31,8 +31,6 @@
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 			#include "Assets\Kena Rebuild Com\Shader\KenaDefferedCommon.cginc"
 
-			
-
 			struct appdata
 			{
 				float4 positionOS	: POSITION;
@@ -125,9 +123,7 @@
 
 
 			TEXTURE2D(_SSS); SAMPLER(sampler_SSS);
-			TEXTURE2D(_SSAO); SAMPLER(sampler_SSAO);
 			TEXTURE2D(_ShadowTex); SAMPLER(sampler_ShadowTex);
-			//TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
 			TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
 
 			float _CommonBar;
