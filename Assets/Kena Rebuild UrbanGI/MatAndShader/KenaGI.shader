@@ -91,15 +91,26 @@ Shader "Kena/KenaGI"
 
             static float4 screen_param = float4(1708, 960, 1.0/1708, 1.0/960);  //这是截帧时的屏幕像素信息 
             //37 15 13&12 + 341 = 353/4:13 356:9 378:17 -> 选12/13,353/354,13
-            static float4x4 M_Inv_VP = float4x4(
+           /* static float4x4 M_Inv_VP = float4x4(
                 float4(0.67306363582611, 0.116760797798633, -0.509014785289764, -58890.16015625),
                 float4(-0.465476632118225, 0.168832123279571, -0.736369132995605, 27509.392578125),
                 float4(-0.00000010974, 0.411912322044372, 0.445718020200729, -6150.4560546875),
                 float4(0, 0, 0, 1)
+                );*/
+            //float4(-58625.35547, 27567.39453, -6383.71826, 0)
+            static float4x4 Matrix_Inv_VP = float4x4(
+                float4(0.7495, 0.11887, -0.5012, -58625.35547),
+                float4(-0.49857, 0.1787, -0.75428, 27567.39453),
+                float4(-2.68273E-08, 0.4585, 0.42411, -6383.71826),
+                float4(0, 0, 0, 1)
                 );
-            static float3 V_CB1_48 = float3(0.67306363582611, -0.465476632118225, -0.00000010974);
-            static float3 V_CB1_49 = float3(0.116760797798633, 0.168832123279571, 0.411912322044372);
-            static float3 V_CB1_50 = float3(-0.509014785289764, -0.736369132995605, 0.445718020200729);
+
+            //static float3 V_CB1_48 = float3(0.67306363582611, -0.465476632118225, -0.00000010974);
+            static float3 V_CB1_48 = float3(0.7495, -0.49857, -2.68273E-08);
+            //static float3 V_CB1_49 = float3(0.116760797798633, 0.168832123279571, 0.411912322044372);
+            static float3 V_CB1_49 = float3(0.11887, 0.1787, 0.4585);
+            //static float3 V_CB1_50 = float3(-0.509014785289764, -0.736369132995605, 0.445718020200729);
+            static float3 V_CB1_50 = float3(-0.5012, -0.75428, 0.42411);
 
             static float4x4 M_CB1_181 = float4x4(
                 float4(0.002263982, -0.06811329, 0.245573655, 0.342455983),
@@ -121,7 +132,8 @@ Shader "Kena/KenaGI"
             static float3 V_CB0_1 = float3(0.045186203, 0.051269457, 0.029556833);
 
 
-            static float3 camPosWS = float3(-58890.16015625, 27509.392578125, -6150.4560546875);
+            //static float3 camPosWS = float3(-58890.16015625, 27509.392578125, -6150.4560546875);
+            static float3 camPosWS = float3(-58625.35547, 27567.39453, -6383.71826);
 
             static float2 cb0_6 = float2(0.998231828212738, 0.998937487602233);
 
@@ -170,7 +182,7 @@ Shader "Kena/KenaGI"
                                                           //使用1作为最后一维的量 -> 将float4(coord.xy, d, 1)视为在hclip中的一个点，参与矩阵变换 
 
                 //use matrix_Inv_VP to rebuild posWS 
-                float4 posWS = mul(M_Inv_VP, hclip);  //注意UE4下，posWS的单位是 "厘米"  
+                float4 posWS = mul(Matrix_Inv_VP, hclip);  //注意UE4下，posWS的单位是 "厘米"  
 
                 //cameraToPixelDir (取反得viewDir: 从视点触发指向摄像机) 
                 half3 cameraToPixelDir = normalize(posWS.xyz - camPosWS);  
@@ -374,7 +386,7 @@ Shader "Kena/KenaGI"
                     //if (matCondi2.w) // #7 号渲染通路 求其特有的基础 Diffuse -> 覆盖到 R15.xyz 
                     if ( false ) //TODO DELETE 
                     {
-                        //使用 M_Inv_VP 的前3x3矩阵(去除仿射变换部分) 对处于NDC空间中的坐标(其中z轴固定为1)做变换
+                        //使用 Matrix_Inv_VP 的前3x3矩阵(去除仿射变换部分) 对处于NDC空间中的坐标(其中z轴固定为1)做变换
                         //所的结果可以认为是: 将摄像机到屏幕像素点的朝向(Direction)通过矩阵逆变换，转换到世界空间中
                         //TODO -> 优化时可精简 
                         half3 camToPixelDirRaw2 = V_CB1_48.xyz * coord.xxx;
