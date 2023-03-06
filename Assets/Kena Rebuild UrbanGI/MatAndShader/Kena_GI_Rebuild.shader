@@ -192,7 +192,18 @@ Shader "Unlit/Kena_GI_Rebuild"
 
                 FGBufferData GBuffer = GetGBufferDataFromSceneTextures(IN.uv);
 
-                test.xyz = GBuffer.BaseColor;
+                float3 DiffuseColor = GBuffer.DiffuseColor;
+                float3 SpecularColor = GBuffer.SpecularColor;
+
+                //RemapClearCoatDiffuseAndSpecularColor(GBuffer, ScreenPosition, DiffuseColor, SpecularColor);
+                float AmbientOcclusion = SAMPLE_TEXTURE2D(_SSAO, sampler_SSAO, IN.uv).r;
+
+                uint ShadingModelID = GBuffer.ShadingModelID;
+                float3 BentNormal = UpsampleDFAO(BufferUV, GBuffer.Depth, GBuffer.WorldNormal);
+
+                float4 OutColor = 0; 
+
+                test.xyz = BentNormal;
 
                 return test;
             }
