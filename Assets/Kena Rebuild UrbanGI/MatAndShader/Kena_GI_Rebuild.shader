@@ -82,7 +82,8 @@ Shader "Unlit/Kena_GI_Rebuild"
                 // Distance field AO was computed at 0,0 regardless of viewrect min
                 float2 DistanceFieldUVs = BufferUV - View_ViewRectMin.xy * View_BufferSizeAndInvSize.zw;
                 DistanceFieldUVs = min(DistanceFieldUVs, AOBufferBilinearUVMax);
-
+#define BILATERAL_UPSAMPLE 1
+#if BILATERAL_UPSAMPLE
                 float2 LowResBufferSize = floor(View_BufferSizeAndInvSize.xy / AO_DOWNSAMPLE_FACTOR);
                 float2 LowResTexelSize = 1.0f / LowResBufferSize;
                 float2 Corner00UV = floor(DistanceFieldUVs * LowResBufferSize - .5f) / LowResBufferSize + .5f * LowResTexelSize;
@@ -115,7 +116,10 @@ Shader "Unlit/Kena_GI_Rebuild"
                     * InvWeight;
 
                 float3 BentNormal = InterpolatedResult.xyz;
+#else
+                float3 BentNormal = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, DistanceFieldUVs).xyz;
 
+#endif
                 // Fade to unoccluded in the distance
                 float FadeAlpha = saturate((AOMaxViewDistance - SceneDepth) * DistanceFadeScale);
                 BentNormal = lerp(WorldNormal, BentNormal, FadeAlpha);
@@ -203,7 +207,7 @@ Shader "Unlit/Kena_GI_Rebuild"
 
                 float4 OutColor = 0; 
 
-                test.xyz = BentNormal;
+                test.xyz = (BentNormal);
 
                 return test;
             }
