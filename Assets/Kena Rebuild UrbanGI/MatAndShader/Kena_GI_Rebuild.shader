@@ -57,9 +57,9 @@ Shader "Unlit/Kena_GI_Rebuild"
 
             static float4 View_ViewRectMin = float4(0, 0, 0, 0);
             static float2 AOBufferBilinearUVMax = float2(0.99823, 0.99894);
-            static float AOMaxViewDistance = 20000;
-            static float DistanceFadeScale = 0.00017;
-
+            static float AOMaxViewDistance = 20000.0f;
+            static float DistanceFadeScale = 0.00017f;
+            static float OcclusionExponent = 0.7f;
 
             float2 SvPositionToBufferUV(float4 SvPosition)
             {
@@ -82,7 +82,7 @@ Shader "Unlit/Kena_GI_Rebuild"
                 // Distance field AO was computed at 0,0 regardless of viewrect min
                 float2 DistanceFieldUVs = BufferUV - View_ViewRectMin.xy * View_BufferSizeAndInvSize.zw;
                 DistanceFieldUVs = min(DistanceFieldUVs, AOBufferBilinearUVMax);
-#define BILATERAL_UPSAMPLE 1
+#define BILATERAL_UPSAMPLE 0
 #if BILATERAL_UPSAMPLE
                 float2 LowResBufferSize = floor(View_BufferSizeAndInvSize.xy / AO_DOWNSAMPLE_FACTOR);
                 float2 LowResTexelSize = 1.0f / LowResBufferSize;
@@ -175,6 +175,96 @@ Shader "Unlit/Kena_GI_Rebuild"
                     SceneDepth, CheckerFromSceneColorUV(UV));
             }
 
+            float3 GetSkySHDiffuse(float3 Normal)
+            {
+                float4 NormalVector = float4(Normal, 1);
+
+                float3 Intermediate0, Intermediate1, Intermediate2;
+                Intermediate0.x = dot(View_SkyIrradianceEnvironmentMap[0], NormalVector);
+                Intermediate0.y = dot(View_SkyIrradianceEnvironmentMap[1], NormalVector);
+                Intermediate0.z = dot(View_SkyIrradianceEnvironmentMap[2], NormalVector);
+
+                float4 vB = NormalVector.xyzz * NormalVector.yzzx;
+                Intermediate1.x = dot(View_SkyIrradianceEnvironmentMap[3], vB);
+                Intermediate1.y = dot(View_SkyIrradianceEnvironmentMap[4], vB);
+                Intermediate1.z = dot(View_SkyIrradianceEnvironmentMap[5], vB);
+
+                float vC = NormalVector.x * NormalVector.x - NormalVector.y * NormalVector.y;
+                Intermediate2 = View_SkyIrradianceEnvironmentMap[6].xyz * vC;
+
+                // max to not get negative colors
+                return max(0, Intermediate0 + Intermediate1 + Intermediate2);
+            }
+
+            float3 SkyLightDiffuse(FGBufferData GBuffer, float AmbientOcclusion, float2 BufferUV, float2 ScreenPosition, float3 BentNormal, float3 DiffuseColor)
+            {
+                float2 UV = BufferUV;
+                float3 Lighting = 0;
+
+                // Always USE_DIRECTIONAL_OCCLUSION_ON_SKY_DIFFUSE 
+                float SkyVisibility = length(BentNormal);;
+                float3 NormalizedBentNormal = BentNormal / (max(SkyVisibility, .00001f));
+                float BentNormalWeightFactor = SkyVisibility;// Use more bent normal in corners
+                float3 SkyLightingNormal = lerp(NormalizedBentNormal, GBuffer.WorldNormal, BentNormalWeightFactor);
+                float DotProductFactor = lerp(dot(NormalizedBentNormal, GBuffer.WorldNormal), 1, BentNormalWeightFactor);
+
+                float ContrastCurve = 1 / (1 + exp(-ContrastAndNormalizeMulAdd.x * (SkyVisibility * 10 - 5)));
+                SkyVisibility = saturate(ContrastCurve * ContrastAndNormalizeMulAdd.y + ContrastAndNormalizeMulAdd.z);
+
+                SkyVisibility = pow(SkyVisibility, OcclusionExponent);
+                SkyVisibility = lerp(SkyVisibility, 1, OcclusionTintAndMinOcclusion.w);
+
+                // Combine with mul, which continues to add SSAO depth even indoors.  SSAO will need to be tweaked to be less strong.
+                SkyVisibility = SkyVisibility * min(GBuffer.GBufferAO, AmbientOcclusion);
+
+                float ScalarFactors = SkyVisibility;
+
+                UNITY_BRANCH
+                if (GBuffer.ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE)
+                {
+                    float3 SubsurfaceLookup = GetSkySHDiffuse(-GBuffer.WorldNormal) * View_SkyLightColor.rgb;
+                    float3 SubsurfaceColor = ExtractSubsurfaceColor(GBuffer);
+                    Lighting += ScalarFactors * SubsurfaceLookup * SubsurfaceColor;
+                }
+
+                if (GBuffer.ShadingModelID == SHADINGMODELID_SUBSURFACE || GBuffer.ShadingModelID == SHADINGMODELID_PREINTEGRATED_SKIN)
+                {
+                    float3 SubsurfaceColor = ExtractSubsurfaceColor(GBuffer);
+                    // Add subsurface energy to diffuse
+                    DiffuseColor += SubsurfaceColor;
+                }
+
+                UNITY_BRANCH
+                if (GBuffer.ShadingModelID == SHADINGMODELID_HAIR)
+                {
+                    float3 N = GBuffer.WorldNormal;
+                    //float3 V = -normalize(mul(float4(ScreenPosition, 1, 0), View_ScreenToWorld).xyz);
+                    float3 V = -normalize(mul(Matrix_Inv_VP, float4(ScreenPosition, 1, 0)).xyz);
+
+                    float3 L = normalize(V - N * dot(V, N));
+                    SkyLightingNormal = L;
+
+                    //InitHairTransmittanceData -> dummy 
+                    FHairTransmittanceData TransmittanceData = (FHairTransmittanceData)0;
+                    bool bEvalMultiScatter = true;
+                    DiffuseColor = PI * HairShading(GBuffer, L, V, N, 1, TransmittanceData, 0, 0.2, uint2(0, 0), bEvalMultiScatter);
+                }
+
+                if (GBuffer.ShadingModelID == SHADINGMODELID_CLOTH)
+                {
+                    float3 ClothFuzz = ExtractSubsurfaceColor(GBuffer);
+                    DiffuseColor += ClothFuzz * GBuffer.CustomData.a;
+                }
+
+                // Compute the preconvolved incoming lighting with the bent normal direction
+                float3 DiffuseLookup = GetSkySHDiffuse(SkyLightingNormal) * View_SkyLightColor.rgb;
+
+                // Apply AO to the sky diffuse and account for darkening due to the geometry term
+                // apply the Diffuse color to the lighting (including OcclusionTintAndMinOcclusion as it's considered another light, that fixes SubsurfaceProfile being too dark)
+                Lighting += ((ScalarFactors * DotProductFactor) * DiffuseLookup + (1 - SkyVisibility) * OcclusionTintAndMinOcclusion.xyz) * DiffuseColor;
+
+                return Lighting;
+            }
 
             v2f vert (appdata IN)
             {
@@ -207,7 +297,19 @@ Shader "Unlit/Kena_GI_Rebuild"
 
                 float4 OutColor = 0; 
 
-                test.xyz = (BentNormal);
+                UNITY_BRANCH
+                if (ShadingModelID != SHADINGMODELID_UNLIT)
+                {
+                    float3 SkyLighting = SkyLightDiffuse(GBuffer, AmbientOcclusion, BufferUV, ScreenPosition, BentNormal, DiffuseColor);
+
+                    OutColor.rgb = SkyLighting;
+                    OutColor.a = 0;
+                }
+
+
+
+
+                test.xyz = (OutColor.rgb);
 
                 return test;
             }
