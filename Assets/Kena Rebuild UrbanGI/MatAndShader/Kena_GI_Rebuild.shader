@@ -88,6 +88,16 @@ Shader "Unlit/Kena_GI_Rebuild"
                 return float4(NDCPos.xyz, 1) * SvPosition.w;
             }
 
+            half3 EnvBRDF(half3 SpecularColor, half Roughness, half NoV)
+            {
+                // Importance sampled preintegrated G * F
+                //float2 AB = Texture2DSampleLevel(PreIntegratedGF, PreIntegratedGFSampler, float2(NoV, Roughness), 0).rg;
+                float2 AB = SAMPLE_TEXTURE2D(_LUT, sampler_LUT, float2(NoV, Roughness)).rg;
+                // Anything less than 2% is physically impossible and is instead considered to be shadowing 
+                float3 GF = SpecularColor * AB.x + saturate(50.0 * SpecularColor.g) * AB.y;
+                return GF;
+            }
+
             float3 UpsampleDFAO(float2 BufferUV, float SceneDepth, float3 WorldNormal)
             {
                 // Distance field AO was computed at 0,0 regardless of viewrect min
@@ -529,11 +539,27 @@ Shader "Unlit/Kena_GI_Rebuild"
                 float SpecularOcclusion = GetSpecularOcclusion(NoV, RoughnessSq, AO);
                 Color.a *= SpecularOcclusion;
                 
+                //获取采样IBL必须的跳转Index，以及多少张IBL能影响当前像素  
                 uint DataStartIndex = 0;
                 uint NumCulledReflectionCaptures = 0;
                 GetAffectedReflectionCapturesAndNextJumpIndex(GBuffer, SvPosition, DataStartIndex, NumCulledReflectionCaptures);
 
-                return 0;
+                //Top of regular reflection or bottom layer of clear coat.
+                Color.rgb += PreExposure * GatherRadiance(Color.a, WorldPosition, R, GBuffer.Roughness, BentNormal,
+                    IndirectIrradiance, GBuffer.ShadingModelID, NumCulledReflectionCaptures, DataStartIndex);
+
+                UNITY_BRANCH
+                if (GBuffer.ShadingModelID == SHADINGMODELID_CLEAR_COAT)
+                {
+                    //todo 
+                }
+                else
+                {
+                    Color.rgb *= EnvBRDF(SpecularColor, GBuffer.Roughness, NoV);
+                }
+
+                // Transform NaNs to black, transform negative colors to black.
+                return -min(-Color.rgb, 0.0);
             }
 
             v2f vert (appdata IN)
@@ -579,7 +605,8 @@ Shader "Unlit/Kena_GI_Rebuild"
                 UNITY_BRANCH
                 if (ShadingModelID != SHADINGMODELID_UNLIT && ShadingModelID != SHADINGMODELID_HAIR)
                 {
-                    OutColor.rgb += ReflectionEnvironment(GBuffer, AmbientOcclusion, BufferUV, ScreenPosition, IN.vertex, BentNormal, SpecularColor);
+                    //TODO: 强度有问题，待查 
+                    //OutColor.rgb += ReflectionEnvironment(GBuffer, AmbientOcclusion, BufferUV, ScreenPosition, IN.vertex, BentNormal, SpecularColor);
                 }
 
                 test.xyz = (OutColor.rgb);

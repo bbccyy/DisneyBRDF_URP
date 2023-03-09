@@ -25,8 +25,8 @@ TextureImporter:
   streamingMipmapsPriority: 0
   vTOnly: 0
   grayScaleToAlpha: 0
-  generateCubemap: 5
-  cubemapConvolution: 0
+  generateCubemap: 1
+  cubemapConvolution: 2
   seamlessCubemap: 1
   textureFormat: 1
   maxTextureSize: 2048
@@ -38,7 +38,7 @@ TextureImporter:
     wrapU: 0
     wrapV: 0
     wrapW: 0
-  nPOTScale: 1
+  nPOTScale: 0
   lightmap: 0
   compressionQuality: 50
   spriteMode: 0
