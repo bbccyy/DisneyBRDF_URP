@@ -128,6 +128,10 @@ Material:
         m_Texture: {fileID: 2800000, guid: e5bf36525811ead4aaa8c91585c8feb6, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _SSR:
+        m_Texture: {fileID: 2800000, guid: ccd29a33ff50f9e44b8ec2e2d9383c1b, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _Sky:
         m_Texture: {fileID: 8900000, guid: ca1f6beed8bfd3340abfa350e7daa5ba, type: 3}
         m_Scale: {x: 1, y: 1}

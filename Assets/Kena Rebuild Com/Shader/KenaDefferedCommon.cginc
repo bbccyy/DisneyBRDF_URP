@@ -532,6 +532,7 @@ float3 GetSkyLightReflection(float3 ReflectionVector, float Roughness)
 float3 GetSkyLightReflectionSupportingBlend(float3 ReflectionVector, float Roughness)
 {
 	float3 Reflection = GetSkyLightReflection(ReflectionVector, Roughness);
+
 	UNITY_BRANCH
 	if (ReflectionStruct_SkyLightParameters.w > 0)
 	{
@@ -539,6 +540,7 @@ float3 GetSkyLightReflectionSupportingBlend(float3 ReflectionVector, float Rough
 		float3 BlendDestinationReflection = SAMPLE_TEXTURECUBE_LOD(_SkyLightBlend, sampler_SkyLightBlend, ReflectionVector, AbsoluteSpecularMip).rgb;
 		Reflection = lerp(Reflection, BlendDestinationReflection * View_SkyLightColor.rgb, ReflectionStruct_SkyLightParameters.w);
 	}
+
 	return Reflection;
 }
 

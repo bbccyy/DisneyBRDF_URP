@@ -60,6 +60,7 @@ Shader "Unlit/Kena_GI_Rebuild"
 
 #define ALLOW_STATIC_LIGHTING false
 
+
             static float4 View_ViewRectMin = float4(0, 0, 0, 0);
             static uint View_DistanceFieldAOSpecularOcclusionMode = 1;
             static float2 AOBufferBilinearUVMax = float2(0.99823, 0.99894);
@@ -72,6 +73,8 @@ Shader "Unlit/Kena_GI_Rebuild"
             static float ApplyBentNormalAO = 1;
             static half View_ReflectionCubemapMaxMip = 7;
             static float4 _CapturePositionAndRadius = float4(-59984.22266, 25498.43164, -6413.56885, 1686.55786);
+            static float4 _CaptureProperties = float4(1.00, 27.00, 0.00, 0.00);
+
 
             float2 SvPositionToBufferUV(float4 SvPosition)
             {
@@ -397,14 +400,16 @@ Shader "Unlit/Kena_GI_Rebuild"
                 float4 ImageBasedReflections = float4(0, 0, 0, CompositeAlpha);
                 float2 CompositedAverageBrightness = float2(0.0f, 1.0f);
 
+                float4 test = 0;  //for test 
+
                 UNITY_LOOP
-                for (uint TileCaptureIndex = 0; TileCaptureIndex < NumCapturesAffectingTile; TileCaptureIndex++)
+                for (uint TileCaptureIndex = 0; TileCaptureIndex < 1; TileCaptureIndex++)
                 {
-                    UNITY_BRANCH
+                    /*UNITY_BRANCH
                     if (ImageBasedReflections.a < 0.001)
                     {
                         break;
-                    }
+                    }*/
 
                     uint CaptureIndex = 0;
                     //我有理由相信这里的CaptureIndex是属于世界空间（而不是基于屏幕空间）中的预计算得到的数据结构所属的Index 
@@ -419,14 +424,15 @@ Shader "Unlit/Kena_GI_Rebuild"
                     //float4 CaptureProperties = ReflectionCapture.CaptureProperties[CaptureIndex]; 
                     
                     float4 CapturePositionAndRadius = _CapturePositionAndRadius;  //这里使用固定值替代 
-                    float4 CaptureProperties = 0; 
+                    float4 CaptureProperties = _CaptureProperties;
 
                     float3 CaptureVector = WorldPosition - CapturePositionAndRadius.xyz;
                     float CaptureVectorLength = sqrt(dot(CaptureVector, CaptureVector));
                     float NormalizedDistanceToCapture = saturate(CaptureVectorLength / CapturePositionAndRadius.w);
 
                     UNITY_BRANCH
-                    if (CaptureVectorLength < CapturePositionAndRadius.w)
+                    //if (CaptureVectorLength < CapturePositionAndRadius.w)
+                    if (true)
                     {
                         //float3 ProjectedCaptureVector = RayDirection;
                         float4 CaptureOffsetAndAverageBrightness = 0;
@@ -440,13 +446,15 @@ Shader "Unlit/Kena_GI_Rebuild"
                         //float CaptureArrayIndex = CaptureProperties.g; //没用CubeArray，所以这个参数这里暂时不需要 
 
                         float4 Sample = SAMPLE_TEXTURECUBE_LOD(_IBL, sampler_IBL, ProjectedCaptureVector, Mip).rgba;
-
+                        
                         Sample.rgb *= CaptureProperties.r;
                         Sample *= DistanceAlpha;
 
                         // Under operator (back to front)
-                        ImageBasedReflections.rgb += Sample.rgb * ImageBasedReflections.a * IndirectSpecularOcclusion;
+                        ImageBasedReflections.rgb += Sample.rgb *
+                            ImageBasedReflections.a * IndirectSpecularOcclusion;
                         ImageBasedReflections.a *= 1 - Sample.a;
+                        //test = ImageBasedReflections;
                     }
                 }
 
@@ -454,8 +462,10 @@ Shader "Unlit/Kena_GI_Rebuild"
                 if (ReflectionStruct_SkyLightParameters.y > 0 && bCompositeSkylight)
                 {
                     float SkyAverageBrightness = 1.0f;
-                    float3 SkyLighting = GetSkyLightReflectionSupportingBlend(RayDirection, Roughness);
-
+                    //TODO: 如下 * 0.05 是我加上的，目前采样返回值SkyLighting亮度很高，经过后续逻辑迭代会导致
+                    //SkyLight过饱和，影响显示效果。在没有彻底搞清楚原因的前提下，先用此魔法数字手动进行调节。
+                    float3 SkyLighting = GetSkyLightReflectionSupportingBlend(RayDirection, Roughness) * 0.05;
+                    
                     // Normalize for static skylight types which mix with lightmaps
                     bool bNormalize = ReflectionStruct_SkyLightParameters.z < 1 && ALLOW_STATIC_LIGHTING;
 
@@ -473,6 +483,7 @@ Shader "Unlit/Kena_GI_Rebuild"
 
                 ImageBasedReflections.rgb += ImageBasedReflections.a * ExtraIndirectSpecular;
 
+                //ImageBasedReflections.rgb = IndirectSpecularOcclusion;  //for test 
                 return ImageBasedReflections.rgb;
             }
 
@@ -484,7 +495,9 @@ Shader "Unlit/Kena_GI_Rebuild"
                 float3 ExtraIndirectSpecular = 0;
 
                 float IndirectDiffuseOcclusion = 0;
-                GetDistanceFieldAOSpecularOcclusion(BentNormal, RayDirection, Roughness, ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE, IndirectSpecularOcclusion, IndirectDiffuseOcclusion, ExtraIndirectSpecular);
+                GetDistanceFieldAOSpecularOcclusion(BentNormal, RayDirection, Roughness, 
+                    ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE, IndirectSpecularOcclusion, 
+                    IndirectDiffuseOcclusion, ExtraIndirectSpecular);
                 // Apply DFAO to IndirectIrradiance before mixing with indirect specular
                 IndirectIrradiance *= IndirectDiffuseOcclusion;
 
@@ -602,14 +615,17 @@ Shader "Unlit/Kena_GI_Rebuild"
                     OutColor.a = 0;
                 }
 
+                float3 ref = 0;
+
                 UNITY_BRANCH
                 if (ShadingModelID != SHADINGMODELID_UNLIT && ShadingModelID != SHADINGMODELID_HAIR)
                 {
-                    //TODO: 强度有问题，待查 
-                    //OutColor.rgb += ReflectionEnvironment(GBuffer, AmbientOcclusion, BufferUV, ScreenPosition, IN.vertex, BentNormal, SpecularColor);
+                    ref = ReflectionEnvironment(GBuffer, AmbientOcclusion, BufferUV, ScreenPosition, IN.vertex, BentNormal, SpecularColor);
+                    OutColor.rgb += ref;
                 }
 
                 test.xyz = (OutColor.rgb);
+                // test.xyz = (ref.rgb);
 
                 return test;
             }
