@@ -124,6 +124,8 @@ static float4 View_SkyLightColor = float4(4.95, 4.19202, 3.12225, 0.00);
 static float4 OcclusionTintAndMinOcclusion = float4(0.04519, 0.05127, 0.02956, 0.00);
 static float4 ContrastAndNormalizeMulAdd = float4(0.01, 40.00843, -19.50422, 0.70);
 
+static float4 ReflectionStruct_SkyLightParameters = float4(7.00, 1.00, 1.00, 0.00);
+
 //SH irradiance map 
 static float4 View_SkyIrradianceEnvironmentMap[] = {
 	float4(0.00226, -0.06811, 0.24557, 0.34246),
@@ -158,6 +160,10 @@ TEXTURE2D(_Comp_M_D_R_F); SAMPLER(sampler_Comp_M_D_R_F);
 TEXTURE2D(_Albedo); SAMPLER(sampler_Albedo);
 TEXTURE2D(_Comp_F_R_X_I); SAMPLER(sampler_Comp_F_R_X_I);
 TEXTURE2D(_SSAO); SAMPLER(sampler_SSAO);
+
+TEXTURECUBE(_IBL); SAMPLER(sampler_IBL);
+TEXTURECUBE(_Sky); SAMPLER(sampler_Sky);
+TEXTURECUBE(_SkyLightBlend); SAMPLER(sampler_SkyLightBlend);
 //------------------Declare Buffer End------------------
 
 
@@ -289,6 +295,18 @@ uint ExtractSubsurfaceProfileInt(FGBufferData BufferData)
 {
 	// can be optimized
 	return uint(BufferData.CustomData.y * 255 + 0.5f);
+}
+
+float ApproximateConeConeIntersection(float ArcLength0, float ArcLength1, float AngleBetweenCones)
+{
+	float AngleDifference = abs(ArcLength0 - ArcLength1);
+
+	float Intersection = smoothstep(
+		0,
+		1.0,
+		1.0 - saturate((AngleBetweenCones - AngleDifference) / (ArcLength0 + ArcLength1 - AngleDifference)));
+
+	return Intersection;
 }
 
 #endif 
@@ -485,3 +503,80 @@ float3 HairShading(FGBufferData GBuffer, float3 L, float3 V, half3 N, float Shad
 }
 #endif
 //------------------HairShading End------------------
+
+
+
+//------------------Reflection Share Start------------------
+#if 1
+#define REFLECTION_CAPTURE_ROUGHEST_MIP 1
+#define REFLECTION_CAPTURE_ROUGHNESS_MIP_SCALE 1.2
+
+half ComputeReflectionCaptureMipFromRoughness(half Roughness, half CubemapMaxMip)
+{
+	// Heuristic that maps roughness to mip level
+	// This is done in a way such that a certain mip level will always have the same roughness, regardless of how many mips are in the texture
+	// Using more mips in the cubemap just allows sharper reflections to be supported
+	half LevelFrom1x1 = REFLECTION_CAPTURE_ROUGHEST_MIP - REFLECTION_CAPTURE_ROUGHNESS_MIP_SCALE * log2(Roughness);
+	return CubemapMaxMip - 1 - LevelFrom1x1;
+}
+
+float3 GetSkyLightReflection(float3 ReflectionVector, float Roughness)
+{
+	float AbsoluteSpecularMip = ComputeReflectionCaptureMipFromRoughness(Roughness, ReflectionStruct_SkyLightParameters.x);
+	//float3 Reflection = TextureCubeSampleLevel(ReflectionStruct.SkyLightCubemap, ReflectionStruct.SkyLightCubemapSampler, ReflectionVector, AbsoluteSpecularMip).rgb;
+	half3 Reflection = SAMPLE_TEXTURECUBE_LOD(_Sky, sampler_Sky, ReflectionVector, AbsoluteSpecularMip).rgb;
+
+	return Reflection * View_SkyLightColor.rgb;
+}
+
+float3 GetSkyLightReflectionSupportingBlend(float3 ReflectionVector, float Roughness)
+{
+	float3 Reflection = GetSkyLightReflection(ReflectionVector, Roughness);
+	UNITY_BRANCH
+	if (ReflectionStruct_SkyLightParameters.w > 0)
+	{
+		float AbsoluteSpecularMip = ComputeReflectionCaptureMipFromRoughness(Roughness, ReflectionStruct_SkyLightParameters.x);
+		float3 BlendDestinationReflection = SAMPLE_TEXTURECUBE_LOD(_SkyLightBlend, sampler_SkyLightBlend, ReflectionVector, AbsoluteSpecularMip).rgb;
+		Reflection = lerp(Reflection, BlendDestinationReflection * View_SkyLightColor.rgb, ReflectionStruct_SkyLightParameters.w);
+	}
+	return Reflection;
+}
+
+float3 GetLookupVectorForSphereCapture(float3 ReflectionVector, float3 WorldPosition,
+	float4 SphereCapturePositionAndRadius, float NormalizedDistanceToCapture,
+	float3 LocalCaptureOffset, inout float DistanceAlpha)
+{
+	float3 ProjectedCaptureVector = ReflectionVector;
+	float ProjectionSphereRadius = SphereCapturePositionAndRadius.w;
+	float SphereRadiusSquared = ProjectionSphereRadius * ProjectionSphereRadius;
+
+	float3 LocalPosition = WorldPosition - SphereCapturePositionAndRadius.xyz;
+	float LocalPositionSqr = dot(LocalPosition, LocalPosition);
+
+	// Find the intersection between the ray along the reflection vector and the capture's sphere
+	float3 QuadraticCoef = 0;
+	QuadraticCoef.x = 1;
+	QuadraticCoef.y = dot(ReflectionVector, LocalPosition);
+	QuadraticCoef.z = LocalPositionSqr - SphereRadiusSquared;
+
+	float Determinant = QuadraticCoef.y * QuadraticCoef.y - QuadraticCoef.z;
+
+	// Only continue if the ray intersects the sphere
+	UNITY_FLATTEN
+	if (Determinant >= 0)
+	{
+		float FarIntersection = sqrt(Determinant) - QuadraticCoef.y;
+
+		float3 LocalIntersectionPosition = LocalPosition + FarIntersection * ReflectionVector;
+		ProjectedCaptureVector = LocalIntersectionPosition - LocalCaptureOffset;
+		// Note: some compilers don't handle smoothstep min > max (this was 1, .6)
+		//DistanceAlpha = 1.0 - smoothstep(.6, 1, NormalizedDistanceToCapture);
+
+		float x = saturate(2.5 * NormalizedDistanceToCapture - 1.5);
+		DistanceAlpha = 1 - x * x * (3 - 2 * x);
+	}
+	return ProjectedCaptureVector;
+}
+
+#endif
+//------------------Reflection Share End------------------

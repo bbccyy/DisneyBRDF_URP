@@ -52,20 +52,26 @@ Shader "Unlit/Kena_GI_Rebuild"
             TEXTURE2D(_GNorm); SAMPLER(sampler_GNorm);
             TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
             TEXTURE2D(_SSR); SAMPLER(sampler_SSR);
-            TEXTURECUBE(_IBL); SAMPLER(sampler_IBL);
-            TEXTURECUBE(_Sky); SAMPLER(sampler_Sky);
+
 
 #ifndef NUM_CULLED_LIGHTS_GRID_STRIDE
     #define NUM_CULLED_LIGHTS_GRID_STRIDE 2
 #endif
 
+#define ALLOW_STATIC_LIGHTING false
+
             static float4 View_ViewRectMin = float4(0, 0, 0, 0);
+            static uint View_DistanceFieldAOSpecularOcclusionMode = 1;
             static float2 AOBufferBilinearUVMax = float2(0.99823, 0.99894);
             static float AOMaxViewDistance = 20000.0f;
             static float DistanceFadeScale = 0.00017f;
             static float OcclusionExponent = 0.7f;
             static uint ForwardLightData_NumGridCells = 12960;
             static uint ForwardLightData_NumReflectionCaptures = 44;
+            static float InvSkySpecularOcclusionStrength = 1;
+            static float ApplyBentNormalAO = 1;
+            static half View_ReflectionCubemapMaxMip = 7;
+            static float4 _CapturePositionAndRadius = float4(-59984.22266, 25498.43164, -6413.56885, 1686.55786);
 
             float2 SvPositionToBufferUV(float4 SvPosition)
             {
@@ -322,6 +328,169 @@ Shader "Unlit/Kena_GI_Rebuild"
 
                 // DataStartIndex = ForwardLightData.NumCulledLightsGrid[NumCulledEntryIndex + 1];
                 DataStartIndex = 0; //同糊弄用，这个索引用于查找下一张映射表，毕竟我们最终是需要得到IBL的具体位置，目前还差2次跳转哩 
+            }
+
+            void GetDistanceFieldAOSpecularOcclusion(float3 BentNormalAO, float3 ReflectionVector, float Roughness, bool bTwoSidedFoliage, out float IndirectSpecularOcclusion, out float IndirectDiffuseOcclusion, out float3 ExtraIndirectSpecular)
+            {
+                IndirectSpecularOcclusion = 1;
+                IndirectDiffuseOcclusion = 1;
+                ExtraIndirectSpecular = 0;
+
+                UNITY_BRANCH 
+                if (ApplyBentNormalAO > 0)
+                {
+                    float BentNormalLength = length(BentNormalAO);
+
+                    UNITY_BRANCH
+                    if (View_DistanceFieldAOSpecularOcclusionMode == 0)
+                    {
+                        IndirectSpecularOcclusion = BentNormalLength;
+                    }
+                    else
+                    {
+                        UNITY_BRANCH
+                        if (bTwoSidedFoliage)
+                        {
+                            IndirectSpecularOcclusion = BentNormalLength;
+                        }
+                        else
+                        {
+                            float ReflectionConeAngle = max(Roughness, .1f) * PI;
+                            float UnoccludedAngle = BentNormalLength * PI * InvSkySpecularOcclusionStrength;
+                            float AngleBetween = acos(dot(BentNormalAO, ReflectionVector) / max(BentNormalLength, .001f));
+                            IndirectSpecularOcclusion = ApproximateConeConeIntersection(ReflectionConeAngle, UnoccludedAngle, AngleBetween);
+
+                            // Can't rely on the direction of the bent normal when close to fully occluded, lerp to shadowed
+                            IndirectSpecularOcclusion = lerp(0, IndirectSpecularOcclusion, saturate((UnoccludedAngle - .1f) / .2f));
+                        }
+                    }
+
+                    IndirectSpecularOcclusion = lerp(IndirectSpecularOcclusion, 1, OcclusionTintAndMinOcclusion.w);
+                    ExtraIndirectSpecular = (1 - IndirectSpecularOcclusion) * OcclusionTintAndMinOcclusion.xyz;
+                }
+            }
+
+            float3 CompositeReflectionCapturesAndSkylight(
+                float CompositeAlpha,
+                float3 WorldPosition,
+                float3 RayDirection,
+                float Roughness,
+                float IndirectIrradiance,
+                float IndirectSpecularOcclusion,
+                float3 ExtraIndirectSpecular,
+                uint NumCapturesAffectingTile,
+                uint CaptureDataStartIndex,
+                int SingleCaptureIndex,
+                bool bCompositeSkylight)
+            {
+                float Mip = ComputeReflectionCaptureMipFromRoughness(Roughness, View_ReflectionCubemapMaxMip);
+                float4 ImageBasedReflections = float4(0, 0, 0, CompositeAlpha);
+                float2 CompositedAverageBrightness = float2(0.0f, 1.0f);
+
+                UNITY_LOOP
+                for (uint TileCaptureIndex = 0; TileCaptureIndex < NumCapturesAffectingTile; TileCaptureIndex++)
+                {
+                    UNITY_BRANCH
+                    if (ImageBasedReflections.a < 0.001)
+                    {
+                        break;
+                    }
+
+                    uint CaptureIndex = 0;
+                    //我有理由相信这里的CaptureIndex是属于世界空间（而不是基于屏幕空间）中的预计算得到的数据结构所属的Index 
+                    //而以ForwardLightData开头的数据结构，存储的是动态数据，由CPU/GPU针对当前帧计算和覆写，记录的是屏幕空间信息 
+                    //具体而言ForwardLightData.CulledLightDataGrid存放了一张映射表，从屏幕空间中划分的cell blocks 映射到 时间空间中的cell blocks索引 
+                    //CaptureIndex = ForwardLightData.CulledLightDataGrid[CaptureDataStartIndex + TileCaptureIndex];
+                    CaptureIndex = 0; //这里糊弄过去，不想在Unity里重建UE才有的CulledLightDataGrid数据结构 
+
+                    //ReflectionCapture.PositionAndRadius对应预计算好的隶属于世界空间中的数据结构，存放位置和范围 
+                    //float4 CapturePositionAndRadius = ReflectionCapture.PositionAndRadius[CaptureIndex]; 
+                    //ReflectionCapture.CaptureProperties同上，存放TexCubeArray的第三维坐标（指定是第几个Cube) 
+                    //float4 CaptureProperties = ReflectionCapture.CaptureProperties[CaptureIndex]; 
+                    
+                    float4 CapturePositionAndRadius = _CapturePositionAndRadius;  //这里使用固定值替代 
+                    float4 CaptureProperties = 0; 
+
+                    float3 CaptureVector = WorldPosition - CapturePositionAndRadius.xyz;
+                    float CaptureVectorLength = sqrt(dot(CaptureVector, CaptureVector));
+                    float NormalizedDistanceToCapture = saturate(CaptureVectorLength / CapturePositionAndRadius.w);
+
+                    UNITY_BRANCH
+                    if (CaptureVectorLength < CapturePositionAndRadius.w)
+                    {
+                        //float3 ProjectedCaptureVector = RayDirection;
+                        float4 CaptureOffsetAndAverageBrightness = 0;
+                        // Fade out based on distance to capture
+                        float DistanceAlpha = 0;
+
+                        float3 ProjectedCaptureVector = GetLookupVectorForSphereCapture(RayDirection, WorldPosition,
+                            CapturePositionAndRadius, NormalizedDistanceToCapture, 
+                            CaptureOffsetAndAverageBrightness.xyz, DistanceAlpha);
+
+                        //float CaptureArrayIndex = CaptureProperties.g; //没用CubeArray，所以这个参数这里暂时不需要 
+
+                        float4 Sample = SAMPLE_TEXTURECUBE_LOD(_IBL, sampler_IBL, ProjectedCaptureVector, Mip).rgba;
+
+                        Sample.rgb *= CaptureProperties.r;
+                        Sample *= DistanceAlpha;
+
+                        // Under operator (back to front)
+                        ImageBasedReflections.rgb += Sample.rgb * ImageBasedReflections.a * IndirectSpecularOcclusion;
+                        ImageBasedReflections.a *= 1 - Sample.a;
+                    }
+                }
+
+                UNITY_BRANCH
+                if (ReflectionStruct_SkyLightParameters.y > 0 && bCompositeSkylight)
+                {
+                    float SkyAverageBrightness = 1.0f;
+                    float3 SkyLighting = GetSkyLightReflectionSupportingBlend(RayDirection, Roughness);
+
+                    // Normalize for static skylight types which mix with lightmaps
+                    bool bNormalize = ReflectionStruct_SkyLightParameters.z < 1 && ALLOW_STATIC_LIGHTING;
+
+                    UNITY_FLATTEN
+                    if (bNormalize)
+                    {
+                        ImageBasedReflections.rgb += ImageBasedReflections.a * SkyLighting * IndirectSpecularOcclusion;
+                        CompositedAverageBrightness.x += SkyAverageBrightness * CompositedAverageBrightness.y;
+                    }
+                    else
+                    {
+                        ExtraIndirectSpecular += SkyLighting * IndirectSpecularOcclusion;
+                    }
+                }
+
+                ImageBasedReflections.rgb += ImageBasedReflections.a * ExtraIndirectSpecular;
+
+                return ImageBasedReflections.rgb;
+            }
+
+            float3 GatherRadiance(float CompositeAlpha, float3 WorldPosition, float3 RayDirection, float Roughness, float3 BentNormal,
+                float IndirectIrradiance, uint ShadingModelID, uint NumCulledReflectionCaptures, uint CaptureDataStartIndex)
+            {
+                // Indirect occlusion from DFAO, which should be applied to reflection captures and skylight specular, but not SSR
+                float IndirectSpecularOcclusion = 1.0f;
+                float3 ExtraIndirectSpecular = 0;
+
+                float IndirectDiffuseOcclusion = 0;
+                GetDistanceFieldAOSpecularOcclusion(BentNormal, RayDirection, Roughness, ShadingModelID == SHADINGMODELID_TWOSIDED_FOLIAGE, IndirectSpecularOcclusion, IndirectDiffuseOcclusion, ExtraIndirectSpecular);
+                // Apply DFAO to IndirectIrradiance before mixing with indirect specular
+                IndirectIrradiance *= IndirectDiffuseOcclusion;
+
+                const bool bCompositeSkylight = true;  //需要将天空盒考虑进来 
+                return CompositeReflectionCapturesAndSkylight(
+                    CompositeAlpha,
+                    WorldPosition,
+                    RayDirection,
+                    Roughness,
+                    IndirectIrradiance,
+                    IndirectSpecularOcclusion,
+                    ExtraIndirectSpecular,
+                    NumCulledReflectionCaptures,
+                    CaptureDataStartIndex,
+                    0,
+                    bCompositeSkylight);
             }
 
             float3 ReflectionEnvironment(FGBufferData GBuffer, float AmbientOcclusion, float2 BufferUV, float2 ScreenPosition, float4 SvPosition, float3 BentNormal, float3 SpecularColor)
