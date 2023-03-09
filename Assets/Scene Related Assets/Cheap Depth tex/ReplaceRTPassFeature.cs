@@ -59,10 +59,10 @@ public class ReplaceRTPassFeature : ScriptableRendererFeature
         m_ScriptablePass = new ReplaceRTPass();
 
         colRT = RenderTexture.GetTemporary(Camera.main.pixelWidth, Camera.main.pixelHeight, 0, RenderTextureFormat.ARGB64);
-        colRT.name = "main color buffer";
-        colRT.filterMode = FilterMode.Point;
+        //colRT.name = "main color buffer";
+        //colRT.filterMode = FilterMode.Point;
         depRT = RenderTexture.GetTemporary(Camera.main.pixelWidth, Camera.main.pixelHeight, 24, RenderTextureFormat.Depth);
-        depRT.name = "main depth buffer";
+        //depRT.name = "main depth buffer";
 
         m_ScriptablePass.Setup(colRT, depRT);   
         // Configures where the render pass should be injected.

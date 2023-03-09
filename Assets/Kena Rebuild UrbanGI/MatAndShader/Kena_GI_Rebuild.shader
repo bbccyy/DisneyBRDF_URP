@@ -13,7 +13,7 @@ Shader "Unlit/Kena_GI_Rebuild"
         [NoScaleOffset] _IBL("IBL", CUBE) = "white" {}
         [NoScaleOffset] _Sky("Sky", CUBE) = "white" {}
         [NoScaleOffset] _LUT("LUT", 2D) = "white" {}
-        [NoScaleOffset] _Spec("Spec", 2D) = "white" {}
+        [NoScaleOffset] _SSR("SSR", 2D) = "white" {}  //ScreenSpaceReflectionsTexture 
 
     }
 
@@ -21,6 +21,7 @@ Shader "Unlit/Kena_GI_Rebuild"
     {
         Tags { "RenderType"="Opaque" }
         Blend One One
+        ZTest Off
 
         LOD 100
 
@@ -50,16 +51,21 @@ Shader "Unlit/Kena_GI_Rebuild"
 
             TEXTURE2D(_GNorm); SAMPLER(sampler_GNorm);
             TEXTURE2D(_LUT); SAMPLER(sampler_LUT);
-            TEXTURE2D(_Spec); SAMPLER(sampler_Spec);
+            TEXTURE2D(_SSR); SAMPLER(sampler_SSR);
             TEXTURECUBE(_IBL); SAMPLER(sampler_IBL);
             TEXTURECUBE(_Sky); SAMPLER(sampler_Sky);
 
+#ifndef NUM_CULLED_LIGHTS_GRID_STRIDE
+    #define NUM_CULLED_LIGHTS_GRID_STRIDE 2
+#endif
 
             static float4 View_ViewRectMin = float4(0, 0, 0, 0);
             static float2 AOBufferBilinearUVMax = float2(0.99823, 0.99894);
             static float AOMaxViewDistance = 20000.0f;
             static float DistanceFadeScale = 0.00017f;
             static float OcclusionExponent = 0.7f;
+            static uint ForwardLightData_NumGridCells = 12960;
+            static uint ForwardLightData_NumReflectionCaptures = 44;
 
             float2 SvPositionToBufferUV(float4 SvPosition)
             {
@@ -75,7 +81,6 @@ Shader "Unlit/Kena_GI_Rebuild"
                 // SvPosition.w: so .w has the SceneDepth, some mobile code and the DepthFade material expression wants that
                 return float4(NDCPos.xyz, 1) * SvPosition.w;
             }
-
 
             float3 UpsampleDFAO(float2 BufferUV, float SceneDepth, float3 WorldNormal)
             {
@@ -122,6 +127,7 @@ Shader "Unlit/Kena_GI_Rebuild"
 #endif
                 // Fade to unoccluded in the distance
                 float FadeAlpha = saturate((AOMaxViewDistance - SceneDepth) * DistanceFadeScale);
+                //FadeAlpha = 0;  //for test 
                 BentNormal = lerp(WorldNormal, BentNormal, FadeAlpha);
 
                 return BentNormal;
@@ -266,6 +272,101 @@ Shader "Unlit/Kena_GI_Rebuild"
                 return Lighting;
             }
 
+            // Point lobe in off-specular peak direction
+            float3 GetOffSpecularPeakReflectionDir(float3 Normal, float3 ReflectionVector, float Roughness)
+            {
+                float a = Pow2(Roughness);
+                return lerp(Normal, ReflectionVector, (1 - a) * (sqrt(1 - a) + a));
+            }
+
+            float GetSpecularOcclusion(float NoV, float RoughnessSq, float AO)
+            {
+                return saturate(pow(NoV + AO, RoughnessSq) - 1 + AO);
+            }
+
+            uint ComputeLightGridCellIndex(uint2 PixelPos, float SceneDepth)
+            {
+                /*
+                const FLightGridData GridData = GetLightGridData(EyeIndex);
+                uint ZSlice = (uint)(max(0, log2(SceneDepth * GridData.LightGridZParams.x + GridData.LightGridZParams.y) * GridData.LightGridZParams.z));
+                ZSlice = min(ZSlice, (uint)(GridData.CulledGridSize.z - 1));  //CulledGridSize.z 存放深度z的上界，更远处的LightGrid就被Cull了
+                uint3 GridCoordinate = uint3(PixelPos >> GridData.LightGridPixelSizeShift, ZSlice); //GridData.LightGridPixelSizeShift==6 
+                uint GridIndex = (GridCoordinate.z * GridData.CulledGridSize.y + GridCoordinate.y) * GridData.CulledGridSize.x + GridCoordinate.x;
+                */
+
+                //  CulledGridSize.xyzw=[27, 15, 32, 32] -> [宽，高，深度] 单位是"个" 
+                //      其中拿出x轴向的cell数，乘以一个cell占用的pixels数 -> 27 * 2^6 = 1728 
+                //      1728 pixels == screen width resolution 
+                // 
+                //  这个GridIndex是按照先x轴增加，满27个cell后再增加一个y轴，
+                //  满了15个y轴(既满了27 * 15个cell组成的一面屏幕墙)之后，
+                //  再往深度挖掘一个z轴单位，以此类推，将3D的cell立方块进行一维化编码 
+
+                uint GridIndex = 0;
+                return GridIndex;
+            }
+
+            void GetAffectedReflectionCapturesAndNextJumpIndex(FGBufferData GBuffer, float4 SvPosition, inout uint DataStartIndex, inout uint NumCulledReflectionCaptures)
+            {
+                float2 LocalPosition = SvPosition.xy - View_ViewRectMin.xy;
+                uint GridIndex = ComputeLightGridCellIndex(uint2(LocalPosition.x, LocalPosition.y), GBuffer.Depth);
+
+                // NUM_CULLED_LIGHTS_GRID_STRIDE==2 -> "2" 个一组，分别记录 NumCulledReflectionCaptures 和 DataStartIndex 这一成对的数据 
+                // ForwardLightData.NumGridCells==12960 -> 27(x轴向) * 15(y轴向) * 32(z轴向) == 12960 cells -> 屏幕空间拆解成这么多个cell 
+                uint NumCulledEntryIndex = (ForwardLightData_NumGridCells + GridIndex) * NUM_CULLED_LIGHTS_GRID_STRIDE;
+
+                // ForwardLightData.NumReflectionCaptures==44 -> 一共有44张IBL纹理，这是上限 
+                // ForwardLightData.NumCulledLightsGrid存放了当前cell受影响的IBL纹理个数，以及下一步寻找具体是哪些纹理的新索引
+                // NumCulledReflectionCaptures = min(ForwardLightData.NumCulledLightsGrid[NumCulledEntryIndex + 0], ForwardLightData.NumReflectionCaptures);
+                NumCulledReflectionCaptures = 1;  //糊弄用，目前不打算在Unity里构建ForwardLightData.NumCulledLightsGrid等数据结构 
+
+                // DataStartIndex = ForwardLightData.NumCulledLightsGrid[NumCulledEntryIndex + 1];
+                DataStartIndex = 0; //同糊弄用，这个索引用于查找下一张映射表，毕竟我们最终是需要得到IBL的具体位置，目前还差2次跳转哩 
+            }
+
+            float3 ReflectionEnvironment(FGBufferData GBuffer, float AmbientOcclusion, float2 BufferUV, float2 ScreenPosition, float4 SvPosition, float3 BentNormal, float3 SpecularColor)
+            {
+                const float PreExposure = 1.f;  //开放系数 
+
+                float4 Color = float4(0, 0, 0, 1);
+                float3 WorldPosition = mul(Matrix_Inv_VP, float4(ScreenPosition * GBuffer.Depth, GBuffer.Depth, 1)).xyz;
+                float3 CameraToPixel = normalize(WorldPosition - CameraPosWS);
+                float IndirectIrradiance = GBuffer.IndirectIrradiance;  //总是1 
+
+                float3 N = GBuffer.WorldNormal;
+                float3 V = -CameraToPixel;
+
+                float3 R = 2 * dot(V, N) * N - V;
+                float NoV = saturate(dot(N, V));
+
+                // Point lobe in off-specular peak direction
+                R = GetOffSpecularPeakReflectionDir(N, R, GBuffer.Roughness);
+
+                // Note: this texture may also contain planar reflections
+                float4 SSR = SAMPLE_TEXTURE2D(_SSR, sampler_SSR, BufferUV);
+                
+                Color.rgb = SSR.rgb;
+                Color.a = 1 - SSR.a;
+
+                UNITY_BRANCH 
+                if (GBuffer.ShadingModelID == SHADINGMODELID_CLEAR_COAT)
+                {
+                    const float ClearCoat = GBuffer.CustomData.x;
+                    Color = lerp(Color, float4(0, 0, 0, 1), ClearCoat);
+                }
+
+                float AO = GBuffer.GBufferAO * AmbientOcclusion;
+                float RoughnessSq = GBuffer.Roughness * GBuffer.Roughness;
+                float SpecularOcclusion = GetSpecularOcclusion(NoV, RoughnessSq, AO);
+                Color.a *= SpecularOcclusion;
+                
+                uint DataStartIndex = 0;
+                uint NumCulledReflectionCaptures = 0;
+                GetAffectedReflectionCapturesAndNextJumpIndex(GBuffer, SvPosition, DataStartIndex, NumCulledReflectionCaptures);
+
+                return 0;
+            }
+
             v2f vert (appdata IN)
             {
                 v2f OUT;
@@ -306,8 +407,11 @@ Shader "Unlit/Kena_GI_Rebuild"
                     OutColor.a = 0;
                 }
 
-
-
+                UNITY_BRANCH
+                if (ShadingModelID != SHADINGMODELID_UNLIT && ShadingModelID != SHADINGMODELID_HAIR)
+                {
+                    OutColor.rgb += ReflectionEnvironment(GBuffer, AmbientOcclusion, BufferUV, ScreenPosition, IN.vertex, BentNormal, SpecularColor);
+                }
 
                 test.xyz = (OutColor.rgb);
 

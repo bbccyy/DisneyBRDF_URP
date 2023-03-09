@@ -361,6 +361,7 @@ FGBufferData DecodeGBufferData(float3 Normal_Raw, float4 Albedo_Raw, float4 Comp
 
 	return GBuffer;
 }
+
 #endif 
 //------------------Gbuffer End------------------
 
@@ -397,7 +398,6 @@ float3 KajiyaKayDiffuseAttenuation(FGBufferData GBuffer, float3 L, float3 Vp, ha
 	float3 ScatterTint = pow(GBuffer.BaseColor / Luma, 1 - Shadow);
 	return sqrt(GBuffer.BaseColor) * DiffuseScatter * ScatterTint;
 }
-
 
 float3 HairShading(FGBufferData GBuffer, float3 L, float3 V, half3 N, float Shadow, FHairTransmittanceData HairTransmittance, float Backlit, float Area, uint2 Random, bool bEvalMultiScatter)
 {

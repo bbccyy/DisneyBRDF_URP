@@ -17,8 +17,9 @@
 
 	SubShader
 	{
-		Tags {"RenderType"="Opaque"}
+		Tags {"RenderType"="Opaque"}  //TODO: use what type? 
 		Blend One One
+		ZTest Off
 
 		LOD 100
 
