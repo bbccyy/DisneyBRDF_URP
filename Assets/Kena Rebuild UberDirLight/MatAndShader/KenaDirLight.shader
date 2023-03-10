@@ -458,13 +458,15 @@
 				float ContactShadow = 1.0f;
 
 				// TODO: 查明为何ContactShadow效果会和截帧输出不一致(特别是披肩下方的阴影) 
-				//ContactShadow = ShadowRayCast(
-				//	WorldPosition - CameraPosWS.xyz,  //对应UE4源码: WorldPosition + View.PreViewTranslation 
-				//	L,
-				//	ContactShadowLength,
-				//	8,
-				//	StepOffset);
-
+#define USE_CONTACT_SHADOW 0 
+#if USE_CONTACT_SHADOW
+				ContactShadow = ShadowRayCast(
+					WorldPosition - CameraPosWS.xyz,  //对应UE4源码: WorldPosition + View.PreViewTranslation 
+					L,
+					ContactShadowLength, 
+					8,
+					StepOffset);
+#endif
 				SurfaceShadow *= ContactShadow;
 
 				uint2 IsEyeHair = GBuffer.ShadingModelID == uint2(SHADINGMODELID_EYE, SHADINGMODELID_HAIR);

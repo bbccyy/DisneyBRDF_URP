@@ -142,7 +142,7 @@ Shader "Unlit/Kena_GI_Rebuild"
                 float3 BentNormal = InterpolatedResult.xyz;
 #else
                 float3 BentNormal = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, DistanceFieldUVs).xyz;
-
+                //float3 BentNormal = SAMPLE_TEXTURE2D(_Normal, sampler_Normal, DistanceFieldUVs).xyz; 
 #endif
                 // Fade to unoccluded in the distance
                 float FadeAlpha = saturate((AOMaxViewDistance - SceneDepth) * DistanceFadeScale);
@@ -431,8 +431,8 @@ Shader "Unlit/Kena_GI_Rebuild"
                     float NormalizedDistanceToCapture = saturate(CaptureVectorLength / CapturePositionAndRadius.w);
 
                     UNITY_BRANCH
-                    //if (CaptureVectorLength < CapturePositionAndRadius.w)
-                    if (true)
+                    if (CaptureVectorLength < CapturePositionAndRadius.w)
+                    //if (true)
                     {
                         //float3 ProjectedCaptureVector = RayDirection;
                         float4 CaptureOffsetAndAverageBrightness = 0;
@@ -464,7 +464,7 @@ Shader "Unlit/Kena_GI_Rebuild"
                     float SkyAverageBrightness = 1.0f;
                     //TODO: 如下 * 0.05 是我加上的，目前采样返回值SkyLighting亮度很高，经过后续逻辑迭代会导致
                     //SkyLight过饱和，影响显示效果。在没有彻底搞清楚原因的前提下，先用此魔法数字手动进行调节。
-                    float3 SkyLighting = GetSkyLightReflectionSupportingBlend(RayDirection, Roughness) * 0.05;
+                    float3 SkyLighting = GetSkyLightReflectionSupportingBlend(RayDirection, Roughness) * 0.02;
                     
                     // Normalize for static skylight types which mix with lightmaps
                     bool bNormalize = ReflectionStruct_SkyLightParameters.z < 1 && ALLOW_STATIC_LIGHTING;
@@ -625,7 +625,7 @@ Shader "Unlit/Kena_GI_Rebuild"
                 }
 
                 test.xyz = (OutColor.rgb);
-                // test.xyz = (ref.rgb);
+                // test.xyz = (ref.rgb); //用于输出 ReflectionEnvironment 
 
                 return test;
             }
