@@ -2,6 +2,10 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
+
+namespace UnityEngine.Rendering.Universal
+{ 
+
 public class SimpleFullScreenBlit : ScriptableRendererFeature
 {
     public Material kena_Prefix; public bool openPrefix;
@@ -45,7 +49,7 @@ public class SimpleFullScreenBlit : ScriptableRendererFeature
         // You don't have to call ScriptableRenderContext.submit, the render pipeline will call it at specific points in the pipeline.
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
-            CommandBuffer cmd = CommandBufferPool.Get(m_ProfilerTag);
+            CommandBuffer cmd = CommandBufferPool.Get(m_ProfilerTag);  
 
             FrameCleanup(cmd);
 
@@ -89,3 +93,4 @@ public class SimpleFullScreenBlit : ScriptableRendererFeature
 }
 
 
+}
