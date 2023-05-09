@@ -30,11 +30,11 @@ public class ConvertCSVtoRT : ScriptableWizard
     private void OnWizardCreate()
     {
         Debug.Log("start");
-        //readCSV();
-        //SetupTex2D();
-        //SaveToRT();
+        readCSV();
+        SetupTex2D();
+        SaveToRT();
 
-        ReadRTAndSaveToTexLocal();
+        //ReadRTAndSaveToTexLocal();
         Debug.Log("done!");
     }
 

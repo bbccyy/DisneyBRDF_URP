@@ -894,16 +894,25 @@
 					FinalColor = light_output.DiffuseLighting + light_output.SpecularLighting;
 
 					test = FinalColor;
+						
+					//SAMPLE_TEXTURE2D 
+					//half3 Normal_Raw = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, IN.uv, 0).xyz;
+					float3 Normal_Raw = SAMPLE_TEXTURE2D_X_LOD(_Normal, sampler_Normal, IN.uv, 0).xyz;
+					//float3 Normal_Raw = SAMPLE_TEXTURE2D(_Normal, sampler_Normal, IN.uv).xyz;
+					//float3 Normal_Raw = SAMPLE_TEXTURE2D(_Normal, sampler_Normal, IN.uv).xyz;
+					//test.xyz = Normal_Raw;// normalize(DecodeNormal(Normal_Raw));// GBuffer.WorldNormal.xyz;
+					//test.xyz = Normal_Raw * 2 - 1;
 					
 					//验证世界坐标正确性用
 					//float4 shouldBeHClipPos = mul(Matrix_VP, float4(WorldPosition - CameraPosWS.xyz, 1));
 					//test.rgb = shouldBeHClipPos.xyz / shouldBeHClipPos.w; 
-					
+					//test.rgb = CameraVector;
 				}
 
 
 				
 				//test.rgb = pow(test.rgb, 1/2.2);  //sGRB ?  
+				
 
 				return float4(test.rgb , test.a);
 			}

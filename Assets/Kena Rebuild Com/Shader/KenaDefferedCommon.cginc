@@ -294,7 +294,7 @@ float3 ExtractSubsurfaceColor(FGBufferData BufferData)
 uint ExtractSubsurfaceProfileInt(FGBufferData BufferData)
 {
 	// can be optimized
-	return uint(BufferData.CustomData.y * 255 + 0.5f);
+	return uint(BufferData.CustomData.y * 255 + 0.5f); 
 }
 
 float ApproximateConeConeIntersection(float ArcLength0, float ArcLength1, float AngleBetweenCones)

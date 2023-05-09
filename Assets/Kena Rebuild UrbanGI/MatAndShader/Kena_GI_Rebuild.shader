@@ -624,8 +624,11 @@ Shader "Unlit/Kena_GI_Rebuild"
                     OutColor.rgb += ref;
                 }
 
+
+                //float4 texA = SAMPLE_TEXTURE2D(_GNorm, sampler_GNorm, IN.uv).rgba;
+
                 test.xyz = (OutColor.rgb);
-                // test.xyz = (ref.rgb); //用于输出 ReflectionEnvironment 
+                //test.xyz = texA.a / 30000; //用于输出 ReflectionEnvironment 
 
                 return test;
             }
