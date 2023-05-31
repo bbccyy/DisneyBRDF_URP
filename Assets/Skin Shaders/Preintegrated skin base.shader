@@ -13,7 +13,7 @@ Shader "Example/Preintegrated skin base"
         _ScatteringOffset("Scattering Boost", Range(0,1)) = 0.0
         _ScatteringPower("Scattering Power", Range(0,2)) = 1.0
         [NoScaleOffset]_AO("AO", 2D) = "white" {}
-        _GIIntensity("GI Inetensity", Range(0, 1)) = 0 
+        _GIIntensity("GI Inetensity", Range(0, 1)) = 0   
     }
     SubShader
     {
